@@ -210,27 +210,25 @@ dat_time_res <- build_dataset(dat, "time_res", "n_analysed_int", "n_analysed_ctr
 dat_insulin_dur <- build_dataset(dat, "insulin_dur", "N_insulin_dur_int", "N_insulin_dur_ctrl", convert_mean = TRUE, mean_method = "wan")
 
 # Mortality outcome (binary)
+opt_col <- function(data, x) if (x %in% names(data)) data[[x]] else NA_real_
+
 dat_mortality <- dat |>
   dplyr::mutate(
-    event_int = coalesce(hosp_mort_int,  `28d_mort_int`),
-    event_ctrl = coalesce(hosp_mort_ctrl, `28d_mort_ctrl`),
-    n_int = n_analysed_int,
-    n_ctrl = n_analysed_ctrl,
-    age_group = as.character(age_group),
-    i_summary = sprintf("%d/%d (%.1f%%)", event_int,  n_int,  100 * event_int  / n_int),
-    c_summary = sprintf("%d/%d (%.1f%%)", event_ctrl, n_ctrl, 100 * event_ctrl / n_ctrl)) |>
-  filter(!is.na(event_int), !is.na(event_ctrl)) |>
-  bayesfoRest:::make_authors_unique()
-
-dat_mortality <- metafor::escalc(
-  measure = "RR",
-  ai = event_int,  bi = n_int  - event_int,
-  ci = event_ctrl, di = n_ctrl - event_ctrl,
-  n1i = n_int, n2i = n_ctrl,
-  data = dat_mortality) |>
-  mutate(yi = as.numeric(yi), vi = as.numeric(vi), sei = sqrt(vi)) |>
-  select(study_id, Author, year, n_int, n_ctrl, yi, sei, vi, i_summary, c_summary, event_int, event_ctrl, n_int, n_ctrl, D1:Overall)
-
+    event_int  = dplyr::coalesce(hosp_mort_int,  `28d_mort_int`),
+    event_ctrl = dplyr::coalesce(hosp_mort_ctrl, `28d_mort_ctrl`),
+    n_int      = n_analysed_int,
+    n_ctrl     = n_analysed_ctrl,
+    age_group  = as.character(age_group),
+    i_summary  = sprintf("%d/%d (%.1f%%)", event_int,  n_int,  100 * event_int  / n_int),
+    c_summary  = sprintf("%d/%d (%.1f%%)", event_ctrl, n_ctrl, 100 * event_ctrl / n_ctrl),
+    m          = (n_int + n_ctrl) / (n_clusters * n_periods),
+    deff       = dplyr::coalesce(1 + (m - 1) * rho_w - m * dplyr::coalesce(rho_b, 0), 1),
+    # Effective sample size (Cochrane Handbook 23.1.4)
+    event_int_eff  = round(event_int  / deff),
+    n_int_eff      = round(n_int      / deff),
+    event_ctrl_eff = round(event_ctrl / deff),
+    n_ctrl_eff     = round(n_ctrl     / deff)) |>
+  dplyr::filter(!is.na(event_int), !is.na(event_ctrl))
 
 # Sensitivity: difference in medians (QE)
 dat_hosp_los_dom <- build_dataset(dat, "hosp_los", "n_analysed_int", "n_analysed_ctrl")
@@ -288,6 +286,54 @@ counts <- list(
   n_primary = nrow(dat_hosp_los),
   n_primary_pts = sum(dat_hosp_los$n_int + dat_hosp_los$n_ctrl, na.rm = TRUE))
 
+# Adverse Events
+adverse_events <- c(
+  "Mortality" = "Mortality",
+  "Hypokalaemia" = "Hypokalaemia",
+  "Hypoglycaemia" = "Hypoglycaemia",
+  "Mechanical ventilation" = "Mechanical ventilation",
+  "AKI" = "AKI")
+
+# Binary-outcome ICCs (none reported; BEST-DKA hospital LOS ICCs assumed)
+icc_ae <- tibble::tribble(
+  ~study_id, ~rho_w_ae, ~rho_b_ae,
+  "Ramanan 2026", 0.0108, 0)
+
+design_ae <- dat |>
+  dplyr::distinct(study_id, design, n_clusters, n_periods, rho_w, rho_b)
+
+dat_ae_raw <- readxl::read_excel("Data/Adverse.xlsx") |>
+  dplyr::mutate(
+    study_id = paste(Study, Year),
+    Event = dplyr::if_else(grepl("^Death", Outcome), "Mortality", Outcome)) |>
+  dplyr::filter(Event %in% adverse_events)
+
+build_ae_dataset <- function(data, event) {
+  data |>
+    dplyr::filter(Event == event) |>
+    dplyr::left_join(design_ae, by = "study_id") |>
+    dplyr::left_join(icc_ae, by = "study_id") |>
+    dplyr::mutate(
+      rho_w = dplyr::coalesce(rho_w_ae, rho_w),
+      rho_b = dplyr::coalesce(rho_b_ae, rho_b, 0),
+      m = (Balanced_N + Saline_N) / (n_clusters * n_periods),
+      deff = dplyr::coalesce(design_effect(design, m, rho_w, rho_b, NA_real_), 1),
+      i_summary = sprintf("%d/%d (%.1f%%)", Balanced_events, Balanced_N, 100 * Balanced_events / Balanced_N),
+      c_summary = sprintf("%d/%d (%.1f%%)", Saline_events, Saline_N, 100 * Saline_events / Saline_N),
+      # DEFF-adjusted effective counts (Cochrane Handbook 23.1.4)
+      event_int = round(Balanced_events / deff),
+      n_int = round(Balanced_N / deff),
+      event_ctrl = round(Saline_events / deff),
+      n_ctrl = round(Saline_N / deff)) |>
+    dplyr::filter(!(event_int == 0 & event_ctrl == 0)) |>
+    dplyr::select(
+      study_id, Author = Study, year = Year, Event, design, deff, i_summary, c_summary,
+      event_int, n_int, event_ctrl, n_ctrl, event_int_raw = Balanced_events, n_int_raw = Balanced_N,
+      event_ctrl_raw = Saline_events, n_ctrl_raw = Saline_N)
+}
+
+dat_ae <- purrr::map(adverse_events, \(ev) build_ae_dataset(dat_ae_raw, ev))
+
 save_rds(dat, "dat")
 save_rds(dat_hosp_los, "dat_hosp_los")
 save_rds(dat_icu_los, "dat_icu_los")
@@ -298,4 +344,5 @@ save_rds(dat_hosp_los_dom, "dat_hosp_los_dom")
 save_rds(dat_rom, "dat_rom")
 save_rds(dat_mean, "dat_mean")
 save_rds(counts, "counts")
+save_rds(dat_ae, "dat_ae")
 

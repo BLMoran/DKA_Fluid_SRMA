@@ -45,6 +45,8 @@ library(posterior)
 library(loo)
 library(scoringRules)
 
+source("Functions.R")
+
 # Reproducibility
 set.seed(1404)
 options(
@@ -77,6 +79,7 @@ dat_mortality <- read_d("dat_mortality")        # log-RR
 dat_hosp_los_dom <- read_d("dat_hosp_los_dom")  # difference in medians
 dat_rom <- read_d("dat_rom")                    # log ratio of medians
 counts <- read_d("counts")
+dat_ae <- read_d("dat_ae")
 
 method_labels <- c(
   wan = "Wan",
@@ -117,7 +120,7 @@ form that could be pooled and contributed to the primary analysis.
 #| tbl-cap: "Characteristics of included trials."
 
 tbl1data <- dat |> 
-  dplyr::select(Author, year, country, trial_design, setting, age_group, n_centres, bss_type, ctrl_type, n_analysed_int, n_analysed_ctrl, fluid_vol_mean_int, fluid_vol_sd_int, fluid_vol_median_int, fluid_vol_iqr_int, fluid_vol_mean_ctrl, fluid_vol_sd_ctrl, fluid_vol_median_ctrl, fluid_vol_iqr_ctrl, age_mean_int, age_sd_int, age_median_int, age_iqr_int, age_mean_ctrl, age_sd_ctrl, age_median_ctrl, age_iqr_ctrl, n_male_int, n_male_ctrl, type1_int, type2_int, type_other_int, type1_ctrl, type2_ctrl, type_other_ctrl) |> 
+  dplyr::select(Author, year, country, trial_design, setting, age_group, n_centres, bss_type, ctrl_type, n_analysed_int, n_analysed_ctrl, fluid_vol_mean_int, fluid_vol_sd_int, fluid_vol_median_int, fluid_vol_iqr_int, fluid_vol_mean_ctrl, fluid_vol_sd_ctrl, fluid_vol_median_ctrl, fluid_vol_iqr_ctrl, age_mean_int, age_sd_int, age_median_int, age_iqr_int, age_mean_ctrl, age_sd_ctrl, age_median_ctrl, age_iqr_ctrl, n_male_int, n_male_ctrl, type1_int, type2_int, type_other_int, type1_ctrl, type2_ctrl, type_other_ctrl, primary, secondary) |> 
   dplyr::mutate(
     trial_design = dplyr::recode_values(
       trial_design,
@@ -222,17 +225,19 @@ tbl1_long <- bind_rows(
                arm = int_type_number,
                age = age_int, male = male_int, female = female_int,
                fluid_vol = fluid_vol_int,
-               t1dm = t1_int, t2dm = t2_int, other_dm = type_other_int),
+               t1dm = t1_int, t2dm = t2_int, other_dm = type_other_int,
+               primary, secondary),
    tbl1data |>
      transmute(study, age_group, setting, trial_design,
                arm = ctrl__type_number,
                age = age_ctrl, male = male_ctrl, female = female_ctrl,
                fluid_vol = fluid_vol_ctrl,
-               t1dm = t1_ctrl, t2dm = t2_ctrl, other_dm = type_other_ctrl)) |>
+               t1dm = t1_ctrl, t2dm = t2_ctrl, other_dm = type_other_ctrl,
+               primary, secondary)) |>
    arrange(study) |>
    # Blank out study-level columns on the second (ctrl) row
    group_by(study) |>
-   mutate(across(c(trial_design, setting, age_group),
+   mutate(across(c(trial_design, setting, age_group, primary, secondary),
                  ~ if_else(row_number() > 1, NA_character_, as.character(.)))) |>
    ungroup() |>
    # Collapse sex and diabetes type into single columns
@@ -266,8 +271,11 @@ tbl1 <- tbl1_long |>
      age = "Age",
      sex = "Sex, n (%)",
      dm_type = "Diabetes Type, n (%)",
-     fluid_vol = "IV Fluid (mL)") |>
+     fluid_vol = "IV Fluid (mL)",
+     primary = "Primary Outcome",
+     secondary = "Secondary Outcome") |>
    cols_move(columns = fluid_vol, after = dm_type) |>
+   cols_move(columns = c(primary, secondary), after = fluid_vol) |>
    sub_missing(missing_text = "") |>
    fmt_markdown(columns = c(sex, dm_type)) |>
    tab_options(
@@ -303,7 +311,10 @@ tbl1 <- tbl1_long |>
    cols_align(align = "left", columns = everything()) |>
    tab_footnote(
      footnote = "Age reported as mean (SD) or median (Q1, Q3). IV Fluid reported as mean (SD) or median (Q1, Q3).",
-     locations = cells_column_labels(columns = age))
+     locations = cells_column_labels(columns = age)) |>
+   tab_footnote(
+     footnote = "AG, anion gap; AKI, acute kidney injury; BE, base excess; Cl, chloride; DAO, days alive and out of; DAOH-28, days alive and out of hospital to day 28; HCO3, bicarbonate; K, potassium; LOS, length of stay; MAKE30, major adverse kidney events at 30 days; MV, mechanical ventilation; Na, sodium; res, resolution; resus, resuscitation; RRT, renal replacement therapy; SBE, standard base excess; SC, subcutaneous; SID, strong ion difference.",
+     locations = cells_column_labels(columns = c(primary, secondary)))
 
 tbl1
 ```
@@ -377,7 +388,9 @@ bayesma::overall_plot(model = fit_hosp_los_re,
                       estimand = "MD",
                       add_tau = TRUE,
                       add_mu_prior = TRUE,
-                      add_tau_prior = TRUE)
+                      add_tau_prior = TRUE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl")
 
 ```
 
@@ -788,19 +801,23 @@ bayesma::egger_plot(egger_insulin_dur, type = "beta_posterior")
 ```{r}
 #| include: false
 
-fit_mort_re <- bayesma(
-  data       = dat_mortality,
-  studyvar   = "Author",
-  event_int = "event_int",
-  event_ctrl = "event_ctrl",
-  n_ctrl     = "n_ctrl",
-  n_int      = "n_int",
-  likelihood = "binomial",
-  estimand   = "RR",
-  model_type = "random_effect",
-  stage      = "two_stage",
-  mu_prior   = normal(0, 1),
-  tau_prior  = half_normal(0, 0.75))
+fits_ae <- purrr::map(dat_ae, \(df) {
+  bayesma(
+    data = df,
+    studyvar = "study_id",
+    event_int = "event_int",
+    event_ctrl = "event_ctrl",
+    n_int = "n_int",
+    n_ctrl = "n_ctrl",
+    likelihood = "binomial",
+    estimand = "RR",
+    model_type = "random_effect",
+    stage = "two_stage",
+    mu_prior = normal(0, 1),
+    tau_prior = half_normal(0, 0.5))
+})
+
+fit_mort_re <- fits_ae[["Mortality"]]
 
 ```
 
@@ -813,14 +830,14 @@ fit_mort_re <- bayesma(
 #| out-width: "100%"
 
 forest(model = fit_mort_re,
-       data = dat_mortality,
+       data = dat_ae$Mortality,
        estimand = "RR",
-       studyvar   = "Author",
+       studyvar = "Author",
        year = "year",
-       i_event = "event_int",
-       c_event = "event_ctrl",
-       c_n     = "n_ctrl",
-       i_n      = "n_int",
+       i_event = "event_int_raw",
+       c_event = "event_ctrl_raw",
+       c_n     = "n_ctrl_raw",
+       i_n      = "n_int_raw",
        label_intervention = "BMES",
        label_control = "0.9% NaCl",
        xlim = c(0.05, 50))
@@ -836,16 +853,14 @@ forest(model = fit_mort_re,
 #| fig-align: center
 
 bayesma::funnel_plot(model = fit_mort_re,
-       data = dat_mortality,
+       data = dat_ae$Mortality,
        estimand = "RR",
        studyvar   = "Author",
        year = "year",
-       c_mean = "mean_ctrl",
-       i_mean  = "mean_int",
-       c_sd = "sd_ctrl",
-       i_sd = "sd_int",
-       c_n     = "n_ctrl",
-       i_n      = "n_int",
+       i_event = "event_int_raw",
+       c_event = "event_ctrl_raw",
+       c_n     = "n_ctrl_raw",
+       i_n      = "n_int_raw",
        label_studies = TRUE)
 ```
 
@@ -871,32 +886,28 @@ bayesma::egger_plot(egger_mort, type = "beta_posterior")
 ```
 :::
 
-### Summary Table
+### Primary and Secondary Outcome Summary Table
 
 ```{r,warning=FALSE}
-summary_row <- function(fit, outcome, estimand, unit, ratio = FALSE, digits = 2) {
-  mu <- fit$summary$median[1]
-  est <- if (ratio) exp(mu) else mu
-  low.cri <- fit$summary$q2.5[1]
-  high.cri <- fit$summary$q97.5[1]
 
-  tibble::tibble(
-    Outcome = outcome,
-    Estimand = estimand,
-    `Estimate (95% CrI)` = sprintf(
-      paste0("%.", digits, "f (%.", digits, "f to %.", digits, "f)%s"),
-      est, low.cri, high.cri, if (nzchar(unit)) paste0(" ", unit) else ""),
-    `Pr(Benefit)` = mean(fit$draws$mu < 0))
-}
+tbl_summary <- dplyr::bind_rows(
+  summary_row(fit_hosp_los_re, "Hospital LOS", "MD", "days") |>
+    dplyr::mutate(Group = "Primary"),
+  dplyr::bind_rows(
+    summary_row(fit_icu_los_re, "ICU LOS", "MD", "hours"),
+    summary_row(fit_dka_res_re, "Time to DKA resolution", "MD", "hours"),
+    summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours"),
+    summary_row(fits_ae$Mortality, "Mortality", "RR", "", ratio = TRUE) |>
+      dplyr::mutate(ess = TRUE)) |>
+    dplyr::mutate(Group = "Secondary")) |> 
+  dplyr::mutate(ess = dplyr::coalesce(ess, FALSE)) |>
+  dplyr::relocate(Group)
 
-dplyr::bind_rows(
-  summary_row(fit_hosp_los_re, "Hospital LOS", "MD", "days"),
-  summary_row(fit_icu_los_re, "ICU LOS", "MD", "hours"),
-  summary_row(fit_dka_res_re, "Time to DKA resolution", "MD", "hours"),
-  summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours"),
-  summary_row(fit_mort_re, "Mortality", "RR", "", ratio = TRUE)) |>
-  dplyr::mutate(Group = c("Primary", rep("Secondary", dplyr::n() - 1)), .before = 1) |>
+outcome_col <- names(tbl_summary)[2]
+
+tbl_summary |>
   gt::gt(groupname_col = "Group") |>
+  gt::cols_hide(ess) |>
   gt::tab_header(
     title = gt::md("**BMES vs 0.9% NaCl: pooled effects**"),
     subtitle = "Bayesian random-effects meta-analysis") |>
@@ -904,9 +915,107 @@ dplyr::bind_rows(
   gt::tab_footnote(
     "Posterior probability the effect favours BMES (shorter stay/duration, lower mortality).",
     locations = gt::cells_column_labels(`Pr(Benefit)`)) |>
+  gt::tab_footnote(
+    "Cluster crossover trials adjusted using effective sample size.",
+    locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ess)) |>
   gt::sub_missing(missing_text = "\u2014")
 
+```
 
+## Adverse Events
+
+Pooled counts of trial-reported adverse events, with a two-stage Bayesian
+random-effects risk ratio (binomial likelihood, priors as for other binary
+outcomes: $\mu \sim N(0, 1)$, $\tau \sim \text{HN}(0, 0.75)$) fitted to each
+event. RR < 1 favours balanced crystalloid (BMES). 
+
+```{r, warning=FALSE}
+#| label: tbl-adverse-events
+
+fits_ae |>
+  purrr::imap(ae_row) |>
+  purrr::list_rbind() |>
+  gt::gt() |>
+  gt::fmt_number(columns = `Pr(Benefit)`, decimals = 2) |>
+  gt::cols_align("center", columns = -`Adverse Event`) |>
+  style_gt() |>
+  gt::tab_options(
+    table.border.top.width = gt::px(2),
+    table.border.top.color = "black",
+    column_labels.border.top.width = gt::px(2),
+    column_labels.border.top.color = "black",
+    table.border.bottom.width = gt::px(2),
+    table.border.bottom.color = "black",
+    table_body.border.bottom.width = gt::px(2),
+    table_body.border.bottom.color = "black") |>
+  gt::tab_style(
+    style = list(
+      gt::cell_text(weight = "bold"),
+      gt::cell_fill(color = "grey90"),
+      gt::cell_borders(sides = "bottom", weight = gt::px(2), color = "black")),
+    locations = gt::cells_column_labels(columns = dplyr::everything())) |>
+  gt::tab_footnote(
+    "Trials reporting the event (trials contributing to the model; trials with no events in either arm excluded).",
+    locations = gt::cells_column_labels(`Number of Trials`)) |>
+  gt::tab_footnote(
+    "Crude event counts, not adjusted for clustering.",
+    locations = gt::cells_column_labels(c(BMES, Saline))) |>
+  gt::tab_footnote(
+    "Bayesian random-effects meta-analysis; cluster crossover trials adjusted using effective sample size.",
+    locations = gt::cells_column_labels(`RR [95% CrI]`)) |>
+  gt::tab_footnote(
+    "Posterior probability RR < 1 (fewer events with BMES).",
+    locations = gt::cells_column_labels(`Pr(Benefit)`))
+
+
+```
+
+## Summary of All Outcomes
+
+```{r, warning=FALSE}
+
+dplyr::bind_rows(
+  summary_row(fit_hosp_los_re, "Hospital LOS", "MD", "days") |>
+    dplyr::mutate(Group = "Primary"),
+  dplyr::bind_rows(
+    summary_row(fit_icu_los_re, "ICU LOS", "MD", "hours"),
+    summary_row(fit_dka_res_re, "Time to DKA resolution", "MD", "hours"),
+    summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours")) |>
+    dplyr::mutate(Group = "Secondary"),
+  fits_ae |>
+    purrr::imap(\(fit, ev) summary_row(fit, ev, "RR", "", ratio = TRUE)) |>
+    purrr::list_rbind() |>
+    dplyr::mutate(Group = "Adverse events")) |>
+  dplyr::relocate(Group) |>
+  gt::gt(groupname_col = "Group") |>
+  gt::tab_header(
+    title = gt::md("**BMES vs 0.9% NaCl: Outcome and Adverse Events**")) |>
+  gt::fmt_number(columns = dplyr::starts_with("Pr("), decimals = 2) |>
+  gt::tab_options(
+    table.border.top.width = gt::px(2),
+    table.border.top.color = "black",
+    column_labels.border.top.width = gt::px(2),
+    column_labels.border.top.color = "black",
+    table.border.bottom.width = gt::px(2),
+    table.border.bottom.color = "black",
+    table_body.border.bottom.width = gt::px(2),
+    table_body.border.bottom.color = "black") |>
+  gt::tab_style(
+    style = list(
+      gt::cell_text(weight = "bold"),
+      gt::cell_borders(sides = "bottom", weight = gt::px(2), color = "black")),
+    locations = gt::cells_column_labels(columns = dplyr::everything())) |>
+  gt::tab_style(
+    style = list(
+      gt::cell_text(weight = "bold"),
+      gt::cell_fill(color = "grey90"),
+      gt::cell_borders(sides = "top", weight = gt::px(2), color = "black"),
+      gt::cell_borders(sides = "bottom", weight = gt::px(2.5), color = "black")),
+    locations = gt::cells_row_groups(groups = dplyr::everything())) |>
+  gt::tab_footnote(
+    "Posterior probability the effect favours BMES (shorter stay/duration, fewer adverse events).",
+    locations = gt::cells_column_labels(`Pr(Benefit)`)) |>
+  gt::sub_missing(missing_text = "\u2014")
 ```
 
 ## Assessment of Bias
@@ -939,8 +1048,6 @@ whether it is consistent with its prior (no prior–data conflict).
 
 ```{r}
 #| label: heterogeneity-assessment
-
-source("Functions.R")
 
 pd <- prior_dominance(fit_hosp_los_re, data = dat_hosp_los, tau_grid = c(0.5, 0.75, 1.5))
 

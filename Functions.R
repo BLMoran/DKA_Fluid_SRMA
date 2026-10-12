@@ -1,17 +1,7 @@
-# =============================================================================
 # prior_dominance() for bayesma (cmdstanr) fits
-#
-# Requires the bayesma object to carry its call (add `out$call <- match.call()`
-# at the end of bayesma()), or pass `call =` explicitly. Refits are done by
-# re-evaluating that call with modified arguments, so all other settings
-# (likelihood, model_type, priors not being varied, MCMC settings) are kept.
-# =============================================================================
 
 `%||%` <- function(a, b) if (is.null(a)) b else a
 
-# ---- helpers ---------------------------------------------------------------
-
-#' @keywords internal
 #' @noRd
 .bma_draws <- function(x) {
   if (inherits(x, "draws")) return(posterior::as_draws_df(x))
@@ -28,7 +18,6 @@
   posterior::as_draws_df(f)
 }
 
-#' @keywords internal
 #' @noRd
 .bma_detect <- function(d, mu_par = NULL, tau_par = NULL) {
   nm <- names(d)
@@ -38,7 +27,7 @@
   )
 }
 
-#' @keywords internal
+
 #' @noRd
 .bma_refit <- function(x, ..., call = NULL, env = globalenv()) {
   args <- x$meta$call_args
@@ -54,7 +43,7 @@
   do.call(bayesma::bayesma, args, envir = env)
 }
 
-#' @keywords internal
+
 #' @noRd
 .bma_summ <- function(v, prefix) {
   tibble::tibble(
@@ -64,20 +53,7 @@
   )
 }
 
-# ---- main ------------------------------------------------------------------
 
-#' Assess prior dominance in a bayesma meta-analysis
-#'
-#' @param fit A `bayesma` object.
-#' @param prior_draws Optional prior draws (data frame / draws / bayesma fitted
-#'   with `sample_prior = TRUE`). If NULL, obtained by refitting with
-#'   `sample_prior = TRUE`.
-#' @param mu_par,tau_par Stan parameter names (auto-detected).
-#' @param tau_grid Half-normal scales for tau-prior refits. NULL to skip.
-#' @param tau_prior_fun Function(scale) returning a `tau_prior` value in
-#'   bayesma's prior syntax.
-#' @param call,env Optional stored call / evaluation environment for refits.
-#' @param ... Extra args passed to every refit (e.g. `chains`, `iter_sampling`).
 #' @export
 prior_dominance <- function(fit,
                             prior_draws   = NULL,
@@ -171,7 +147,6 @@ prior_dominance <- function(fit,
             class = "prior_dominance")
 }
 
-# ---- mu-prior sweep --------------------------------------------------------
 
 #' @export
 prior_scale_sweep <- function(fit,
@@ -195,7 +170,6 @@ prior_scale_sweep <- function(fit,
   })
 }
 
-# ---- tau-prior sweep -------------------------------------------------------
 
 #' @export
 tau_scale_sweep <- function(fit,
@@ -228,7 +202,6 @@ tau_scale_sweep <- function(fit,
   })
 }
 
-# ---- prior ESS -------------------------------------------------------------
 
 #' @export
 prior_ess <- function(fit, data = NULL, se_col = "sei", typical_se = NULL,
@@ -262,7 +235,6 @@ prior_ess <- function(fit, data = NULL, se_col = "sei", typical_se = NULL,
             class = "prior_ess")
 }
 
-# ---- print / gt / plots (unchanged logic) ----------------------------------
 
 #' @export
 print.prior_dominance <- function(x, ...) {
@@ -551,4 +523,96 @@ fmt_summary <- function(mean, sd, med, q1, q3) {
     !is.na(mean),
     sprintf("%.2f (%.2f)", mean, sd),
     sprintf("%.2f (%.2f\u2013%.2f)", med, q1, q3))
+}
+
+#' @export
+summary_row <- function(fit, outcome, measure, units, ratio = FALSE) {
+  mu <- fit$draws$mu
+  q <- stats::quantile(mu, c(0.5, 0.025, 0.975), names = FALSE)
+  if (ratio) q <- exp(q)
+  
+  tibble::tibble(
+    Outcome = outcome,
+    Measure = measure,
+    Units = units,
+    `Estimate [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", q[1], q[2], q[3]),
+    `Pr(Benefit)` = mean(mu < 0))
+}
+
+
+#' @export
+fmt_n <- function(e, n) sprintf("%d/%d (%.1f%%)", e, n, 100 * e / n)
+
+
+#' @export
+fit_binary_rr <- function(data, studyvar, event_int, event_ctrl, n_int, n_ctrl,
+                          mu_prior = bayesma::normal(0, 1),
+                          tau_prior = bayesma::half_normal(0, 0.75)) {
+  bayesma::bayesma(
+    data       = data,
+    studyvar   = studyvar,
+    event_int  = event_int,
+    event_ctrl = event_ctrl,
+    n_int      = n_int,
+    n_ctrl     = n_ctrl,
+    likelihood = "binomial",
+    estimand   = "RR",
+    model_type = "random_effect",
+    stage      = "two_stage",
+    mu_prior   = mu_prior,
+    tau_prior  = tau_prior)
+}
+
+
+#' @export
+binary_rr_row <- function(data, fit, label,
+                          studyvar, event_int, event_ctrl, n_int, n_ctrl) {
+  mu <- fit$summary$median[1]
+  lo <- fit$summary$q2.5[1]
+  hi <- fit$summary$q97.5[1]
+
+  tibble::tibble(
+    Outcome          = label,
+    k                = dplyr::n_distinct(data[[studyvar]]),
+    `Intervention`   = fmt_n(sum(data[[event_int]]),  sum(data[[n_int]])),
+    `Control`        = fmt_n(sum(data[[event_ctrl]]), sum(data[[n_ctrl]])),
+    `RR [95% CrI]`   = sprintf("%.2f [%.2f, %.2f]", exp(mu), exp(lo), exp(hi)),
+    `Pr(Benefit)`    = mean(fit$draws$mu < 0))
+}
+
+#' @export
+style_gt <- function(tbl) {
+  tbl |>
+    gt::tab_options(
+      table.border.top.width = gt::px(2),
+      table.border.top.color = "black",
+      column_labels.border.top.width = gt::px(2),
+      column_labels.border.top.color = "black",
+      table.border.bottom.width = gt::px(2),
+      table.border.bottom.color = "black",
+      table_body.border.bottom.width = gt::px(2),
+      table_body.border.bottom.color = "black") |>
+    gt::tab_style(
+      style = list(
+        gt::cell_text(weight = "bold"),
+        gt::cell_borders(sides = "bottom", weight = gt::px(2), color = "black")),
+      locations = gt::cells_column_labels(columns = dplyr::everything()))
+}
+
+#' @export
+fmt_n <- function(e, n) sprintf("%d/%d (%.1f%%)", sum(e), sum(n), 100 * sum(e) / sum(n))
+
+#' @export
+ae_row <- function(fit, event) {
+  d <- dat_ae[[event]]
+  mu <- fit$draws$mu
+  q <- exp(stats::quantile(mu, c(0.5, 0.025, 0.975), names = FALSE))
+  
+  tibble::tibble(
+    `Adverse Event` = event,
+    `Number of Trials` = nrow(d),
+    BMES = fmt_n(d$event_int_raw, d$n_int_raw),
+    Saline = fmt_n(d$event_ctrl_raw, d$n_ctrl_raw),
+    `RR [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", q[1], q[2], q[3]),
+    `Pr(Benefit)` = mean(mu < 0))
 }
