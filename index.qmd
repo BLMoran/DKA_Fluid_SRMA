@@ -61,6 +61,27 @@ MCID_RES24_PROP <- 0.10   # proportion resolved at 24 h
 ROPE_LOS        <- c(-0.5, 0.5)
 ROPE_LOS_ALT    <- list(narrow = c(-0.25, 0.25), wide = c(-1, 1))
 ROPE_ROM        <- c(0.93, 1.07)
+BASELINE_RES24 <- 0.53
+
+# Priors
+# Primary outcome: prespecified (protocol)
+# Secondary continuous outcomes: weakly regularising, mu ~ N(0, 1 SD), tau ~ HN(0, 0.5 SD),
+# with SD = IQR / 1.35 from external data (not the trials in this review)
+iqr_sd <- function(q1, q3) (q3 - q1) / 1.35
+
+ext_sd <- c(
+  hosp_los = round(iqr_sd(2.39, 6.74),1),   # days; external DKA cohort (n = 6000)
+  icu_los = round(iqr_sd(24, 64.2),1),      # hours; external DKA cohort (n = 6000)
+  insulin_dur = round(iqr_sd(27, 67),1),    # hours; Chua et al., saline arm
+  time_res = round(iqr_sd(27, 67),1))       # hours; insulin duration used as proxy
+
+priors <- list(
+  hosp_los = list(mu = normal(0, 1), tau = half_normal(0, 0.75)),
+  hosp_los_wr = list(mu = normal(0, ext_sd[["hosp_los"]]), tau = half_normal(0, 0.5 * ext_sd[["hosp_los"]])),
+  icu_los = list(mu = normal(0, ext_sd[["icu_los"]]), tau = half_normal(0, 0.5 * ext_sd[["icu_los"]])),
+  insulin_dur = list(mu = normal(0, ext_sd[["insulin_dur"]]), tau = half_normal(0, 0.5 * ext_sd[["insulin_dur"]])),
+  time_res = list(mu = normal(0, ext_sd[["time_res"]]), tau = half_normal(0, 0.5 * ext_sd[["time_res"]])),
+  binary = list(mu = normal(0, 1), tau = half_normal(0, 0.5)))
 
 # Load data
 d_dir <- here::here("Data", "Clean")
@@ -71,13 +92,15 @@ read_m <- function(name) readRDS(file.path(m_dir, paste0(name, ".rds")))
 
 # --- datasets ---
 dat <- read_d("dat")
-dat_hosp_los <- read_d("dat_hosp_los")          # MD (Wan) - primary
-dat_icu_los <- read_d("dat_icu_los")            # MD (Wan)
-dat_time_res <- read_d("dat_time_res")          # MD (Wan)
-dat_insulin_dur <- read_d("dat_insulin_dur")    # MD (Wan)
-dat_mortality <- read_d("dat_mortality")        # log-RR
-dat_hosp_los_dom <- read_d("dat_hosp_los_dom")  # difference in medians
-dat_rom <- read_d("dat_rom")                    # log ratio of medians
+dat_hosp_los <- read_d("dat_hosp_los")         
+dat_icu_los <- read_d("dat_icu_los")    
+dat_time_res <- read_d("dat_time_res") 
+dat_res24 <- read_d("dat_res24")
+dat_res48 <- read_d("dat_res48")
+dat_insulin_dur <- read_d("dat_insulin_dur") 
+dat_mortality <- read_d("dat_mortality")  
+dat_hosp_los_dom <- read_d("dat_hosp_los_dom") 
+dat_rom <- read_d("dat_rom")  
 counts <- read_d("counts")
 dat_ae <- read_d("dat_ae")
 
@@ -88,12 +111,6 @@ method_labels <- c(
   bc = "Box-Cox",
   shi = "Shi",
   yang = "Yang")
-
-#dat_icu_los <- dat_icu_los |> 
-  #mutate(mean_int = mean_int/24,
-    #mean_ctrl = mean_ctrl/24,
-    #sd_int = sd_int/24,
-    #sd_ctrl = sd_ctrl/24)
 
 ```
 
@@ -117,7 +134,6 @@ form that could be pooled and contributed to the primary analysis.
 
 ```{r}
 #| label: tbl-incl-trials
-#| tbl-cap: "Characteristics of included trials."
 
 tbl1data <- dat |> 
   dplyr::select(Author, year, country, trial_design, setting, age_group, n_centres, bss_type, ctrl_type, n_analysed_int, n_analysed_ctrl, fluid_vol_mean_int, fluid_vol_sd_int, fluid_vol_median_int, fluid_vol_iqr_int, fluid_vol_mean_ctrl, fluid_vol_sd_ctrl, fluid_vol_median_ctrl, fluid_vol_iqr_ctrl, age_mean_int, age_sd_int, age_median_int, age_iqr_int, age_mean_ctrl, age_sd_ctrl, age_median_ctrl, age_iqr_ctrl, n_male_int, n_male_ctrl, type1_int, type2_int, type_other_int, type1_ctrl, type2_ctrl, type_other_ctrl, primary, secondary) |> 
@@ -338,8 +354,8 @@ fit_hosp_los_re <- bayesma(
   estimand   = "MD",
   model_type = "random_effect",
   stage      = "two_stage",
-  mu_prior   = normal(0, 1),
-  tau_prior  = half_normal(0, 0.75))
+  mu_prior   = priors$hosp_los$mu,
+  tau_prior  = priors$hosp_los$tau)
 
 ```
 
@@ -357,7 +373,7 @@ and a posterior probability of a clinically meaningful reduction (\>
 ## Forest Plot
 
 ```{r, warning=FALSE}
-#| fig-height: 4.5
+#| fig-height: 5
 #| fig-width: 10
 #| out-width: "100%"
 
@@ -373,7 +389,9 @@ forest(model = fit_hosp_los_re,
        c_n     = "n_ctrl",
        i_n      = "n_int",
        label_intervention = "BMES",
-       label_control = "0.9% NaCl")
+       label_control = "0.9% NaCl",
+       add_pred = TRUE,
+       x_label = "Mean Difference (Days)")
 ```
 
 ## Overall Plot
@@ -384,13 +402,18 @@ forest(model = fit_hosp_los_re,
 #| out-width: "70%"
 #| fig-align: center
 
+# tau categories based on MCID: 0.5x MCID, MCID, 2 × MCID (days)
+
 bayesma::overall_plot(model = fit_hosp_los_re,
                       estimand = "MD",
                       add_tau = TRUE,
                       add_mu_prior = TRUE,
                       add_tau_prior = TRUE,
                       label_intervention = "BMES",
-                      label_control = "0.9% NaCl")
+                      label_control = "0.9% NaCl",
+                      tau_categories = list(
+                      breaks = c(0.25, 0.5, 1),
+                      labels = c("Low", "Moderate", "High", "Very high")))
 
 ```
 
@@ -432,7 +455,7 @@ bayesma::funnel_plot(model = fit_hosp_los_re,
 ## Bayesian Egger Regression
 
 ```{r}
-#| fig-cap: "Bayesian Egger regression and funnel plot for hospital LOS."
+#| fig-cap: "Bayesian Egger regression posterior for hospital LOS."
 #| fig-height: 5
 #| fig-width: 8
 #| out-width: "55%"
@@ -461,7 +484,7 @@ Subgroup analyses were pre-specified for the primary outcome only
 posterior difference between subgroups are reported.
 
 ::: panel-tabset
-## Age Group
+## Age Group: Forest Plot
 
 ```{r, warning=FALSE}
 #| fig-height: 6
@@ -484,6 +507,65 @@ forest(model = fit_hosp_los_re,
        label_intervention = "BMES",
        label_control = "0.9% NaCl")
 
+```
+
+## Age Group: Meta-Regression
+
+```{r, warning=FALSE}
+#| fig-height: 6
+#| fig-width: 10
+#| out-width: "100%"
+
+metareg_age <- meta_reg(data = dat_hosp_los,
+         studyvar = "Author",
+         mods = ~ age_group,
+         mean_ctrl = "mean_ctrl",
+         mean_int  = "mean_int",
+         sd_ctrl = "sd_ctrl",
+         sd_int = "sd_int",
+         n_ctrl     = "n_ctrl",
+         n_int      = "n_int",
+         likelihood = "gaussian",
+         model_type = "random_effect",
+         stage      = "two_stage",
+         mu_prior   = normal(0, 1),
+         tau_prior  = half_normal(0, 0.75))
+
+subgroup_rows <- function(fit, coef, labels, units = "days", ratio = FALSE) {
+  mu <- fit$draws$mu
+  beta <- fit$draws[[paste0("beta_", coef)]]
+
+  draws <- list(mu, mu + beta, beta) |>
+    rlang::set_names(c(labels, paste0("Difference (", labels[2], " \u2212 ", labels[1], ")")))
+
+  draws |>
+    purrr::imap(\(x, nm) {
+      q <- stats::quantile(x, c(0.5, 0.025, 0.975), names = FALSE)
+      if (ratio) q <- exp(q)
+      tibble::tibble(
+        Subgroup = nm,
+        `Estimate [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", q[1], q[2], q[3]),
+        `Pr(< 0)` = mean(x < 0))
+    }) |>
+    purrr::list_rbind()
+}
+
+subgroup_rows(metareg_age, coef = "age_groupPaediatric", labels = c("Adult", "Paediatric")) |>
+  gt::gt() |>
+  gt::cols_label(`Estimate [95% CrI]` = "MD, days [95% CrI]", `Pr(< 0)` = "Pr(Benefit)") |>
+  gt::fmt_number(columns = `Pr(< 0)`, decimals = 2) |>
+  gt::cols_align("center", columns = -Subgroup) |>
+  gt::tab_header(title = gt::md("**Hospital length of stay by age group**")) |>
+  style_gt() |>
+  gt::tab_style(
+    style = gt::cell_text(style = "italic"),
+    locations = gt::cells_body(rows = grepl("^Difference", Subgroup))) |>
+  gt::tab_footnote(
+    "Bayesian random-effects meta-regression with age group as a moderator; between-study heterogeneity (\u03c4) shared across subgroups.",
+    locations = gt::cells_title("title")) |>
+  gt::tab_footnote(
+    "For the difference row: posterior probability of a greater reduction in children than adults.",
+    locations = gt::cells_column_labels(`Pr(< 0)`))
 ```
 
 ## BMES Fluid
@@ -509,12 +591,88 @@ forest(model = fit_hosp_los_re,
        label_intervention = "BMES",
        label_control = "0.9% NaCl")
 ```
+
+## BMES Fluid: Meta-regression
+```{r, warning=FALSE}
+#| fig-height: 6
+#| fig-width: 10
+#| out-width: "100%"
+
+metareg_bmes <- meta_reg(data = dat_hosp_los,
+         studyvar = "Author",
+         mods = ~ bmes_type,
+         mean_ctrl = "mean_ctrl",
+         mean_int  = "mean_int",
+         sd_ctrl = "sd_ctrl",
+         sd_int = "sd_int",
+         n_ctrl     = "n_ctrl",
+         n_int      = "n_int",
+         likelihood = "gaussian",
+         model_type = "random_effect",
+         stage      = "two_stage",
+         mu_prior   = normal(0, 1),
+         tau_prior  = half_normal(0, 0.75))
+
+subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Ringer's Solution", "Plasma-Lyte")) |>
+  gt::gt() |>
+  gt::cols_label(`Estimate [95% CrI]` = "MD, days [95% CrI]", `Pr(< 0)` = "Pr(Benefit)") |>
+  gt::fmt_number(columns = `Pr(< 0)`, decimals = 2) |>
+  gt::cols_align("center", columns = -Subgroup) |>
+  gt::tab_header(title = gt::md("**Hospital length of stay by BMES type**")) |>
+  style_gt() |>
+  gt::tab_style(
+    style = gt::cell_text(style = "italic"),
+    locations = gt::cells_body(rows = grepl("^Difference", Subgroup))) |>
+  gt::tab_footnote(
+    "Bayesian random-effects meta-regression with BMES group as a moderator; between-study heterogeneity (\u03c4) shared across subgroups.",
+    locations = gt::cells_title("title")) |>
+  gt::tab_footnote(
+    "For the difference row: posterior probability of a greater reduction in Plasma-Lyte than Ringer's solution",
+    locations = gt::cells_column_labels(`Pr(< 0)`))
+```
 :::
 
 ## Secondary Outcomes
 
-Secondary outcomes were ICU length of stay, time to DKA resolution and
+Secondary outcomes were ICU length of stay, time to DKA resolution,
 duration of intravenous insulin infusion, and mortality.
+
+Secondary continuous outcomes used weakly regularising priors
+($\mu \sim N(0, 1\ \text{SD})$, $\tau \sim \text{HN}(0, 0.5\ \text{SD})$),
+with the outcome SD estimated as IQR/1.35 from external data rather than
+from the included trials: ICU length of stay from ANZICS APD with
+patients with DKA (SD ≈ `r round(ext_sd[["icu_los"]])` hours), and
+duration of insulin infusion from the saline arm of Chua et al. (SD ≈
+`r round(ext_sd[["insulin_dur"]])` hours).
+
+```{r}
+#| label: tbl-priors
+
+tibble::tribble(
+  ~Outcome, ~Units, ~`External SD`, ~Source, ~`μ prior`, ~`τ prior`,
+  "Hospital LOS (primary, prespecified)", "days", NA, "Protocol", "N(0, 1)", "HN(0, 0.75)",
+  "Hospital LOS (weakly regularising, sensitivity)", "days", ext_sd[["hosp_los"]], "Venkatesh (2015)",
+    sprintf("N(0, %.1f)", ext_sd[["hosp_los"]]), sprintf("HN(0, %.1f)", 0.5 * ext_sd[["hosp_los"]]),
+  "ICU LOS", "hours", ext_sd[["icu_los"]], "Venkatesh (2015)",
+    sprintf("N(0, %.0f)", ext_sd[["icu_los"]]), sprintf("HN(0, %.0f)", 0.5 * ext_sd[["icu_los"]]),
+  "Time to DKA resolution", "hours", ext_sd[["time_res"]], "Chua (2012) (insulin duration)",
+    sprintf("N(0, %.0f)", ext_sd[["time_res"]]), sprintf("HN(0, %.0f)", 0.5 * ext_sd[["time_res"]]),
+  "DKA resolution at 24 hours", "RD", NA, "\u2014", "N(0, 1)", NA,
+  "Duration of insulin infusion", "hours", ext_sd[["insulin_dur"]], "Chua (2012) (saline arm)",
+    sprintf("N(0, %.0f)", ext_sd[["insulin_dur"]]), sprintf("HN(0, %.0f)", 0.5 * ext_sd[["insulin_dur"]]),
+  "Mortality and adverse events", "log RR", NA, "\u2014", "N(0, 1)", "HN(0, 0.5)") |>
+  gt::gt() |>
+  gt::fmt_number(columns = `External SD`, decimals = 1) |>
+  gt::sub_missing(missing_text = "\u2014") |>
+  gt::tab_header(title = gt::md("**Prior distributions**")) |>
+  style_gt() |>
+  gt::tab_footnote(
+    "SD estimated as IQR/1.35 from external data, not from trials included in this review.",
+    locations = gt::cells_column_labels(`External SD`)) |>
+  gt::tab_footnote(
+    "Common-effect model (four trials), so no \u03c4 prior; reported as the marginal risk difference.",
+    locations = gt::cells_body(columns = Outcome, rows = Outcome == "DKA resolution at 24 hours"))
+```
 
 ### ICU Length of Stay
 
@@ -534,8 +692,8 @@ fit_icu_los_re <- bayesma(
   estimand   = "MD",
   model_type = "random_effect",
   stage      = "two_stage",
-  mu_prior   = normal(0, 1),
-  tau_prior  = half_normal(0, 0.75))
+  mu_prior   = priors$icu_los$mu,
+  tau_prior  = priors$icu_los$tau)
 
 ```
 
@@ -559,7 +717,32 @@ forest(model = fit_icu_los_re,
        c_n     = "n_ctrl",
        i_n      = "n_int",
        label_intervention = "BMES",
-       label_control = "0.9% NaCl")
+       label_control = "0.9% NaCl",
+       add_pred = TRUE,
+       x_label = "Mean Difference (Hours)")
+```
+
+## Overall Plot
+
+```{r, warning=FALSE}
+#| fig-height: 5
+#| fig-width: 9
+#| out-width: "70%"
+#| fig-align: center
+
+# tau categories based on MCID: 0.5x MCID, MCID, 2 × MCID (days)
+
+bayesma::overall_plot(model = fit_icu_los_re,
+                      estimand = "MD",
+                      add_tau = TRUE,
+                      add_mu_prior = TRUE,
+                      add_tau_prior = TRUE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl",
+                      tau_categories = list(
+                        breaks = c(3, 6, 12),
+                        labels = c("Low", "Moderate", "High", "Very high")))
+
 ```
 
 ## Funnel Plot
@@ -588,7 +771,7 @@ bayesma::funnel_plot(model = fit_icu_los_re,
 ## Bayesian Egger Regression
 
 ```{r}
-#| fig-cap: "Bayesian Egger regression and funnel plot for hospital LOS."
+#| fig-cap: "Bayesian Egger regression posterior for ICU LOS."
 #| fig-height: 5
 #| fig-width: 8
 #| out-width: "55%"
@@ -627,8 +810,8 @@ fit_dka_res_re <- bayesma(
   estimand   = "MD",
   model_type = "random_effect",
   stage      = "two_stage",
-  mu_prior   = normal(0, 1),
-  tau_prior  = half_normal(0, 0.75))
+  mu_prior   = priors$time_res$mu,
+  tau_prior  = priors$time_res$tau)
 
 ```
 
@@ -636,7 +819,7 @@ fit_dka_res_re <- bayesma(
 ## Forest Plot
 
 ```{r, warning=FALSE}
-#| fig-height: 4.5
+#| fig-height: 5
 #| fig-width: 10
 #| out-width: "100%"
 
@@ -653,7 +836,32 @@ forest(model = fit_dka_res_re,
        i_n      = "n_int",
        label_intervention = "BMES",
        label_control = "0.9% NaCl",
-       xlim = c(-10, 10))
+       xlim = c(-10, 10),
+       add_pred = TRUE,
+       x_label = "Mean Difference (Hours)")
+```
+
+## Overall Plot
+
+```{r, warning=FALSE}
+#| fig-height: 5
+#| fig-width: 9
+#| out-width: "70%"
+#| fig-align: center
+
+# tau categories based on MCID: 0.5x MCID, MCID, 2 × MCID (days)
+
+bayesma::overall_plot(model = fit_dka_res_re,
+                      estimand = "MD",
+                      add_tau = TRUE,
+                      add_mu_prior = TRUE,
+                      add_tau_prior = TRUE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl",
+                      tau_categories = list(
+                        breaks = c(3, 6, 12),
+                        labels = c("Low", "Moderate", "High", "Very high")))
+
 ```
 
 ## Funnel Plot
@@ -682,7 +890,7 @@ bayesma::funnel_plot(model = fit_dka_res_re,
 ## Bayesian Egger Regression
 
 ```{r}
-#| fig-cap: "Bayesian Egger regression and funnel plot for hospital LOS."
+#| fig-cap: "Bayesian Egger regression posterior for time to DKA resolution."
 #| fig-height: 5
 #| fig-width: 8
 #| out-width: "55%"
@@ -700,6 +908,113 @@ egger_dka_res <- bayesma::egger(
   likelihood = "gaussian")
 
 bayesma::egger_plot(egger_dka_res, type = "beta_posterior")
+```
+:::
+
+### Proportion of Patients with DKA Resolution at 24 Hours
+
+```{r}
+#| include: false
+
+fit_res24_ce <- bayesma(
+      data = dat_res24,
+      studyvar = "Author",
+      event_int = "event_int",
+      event_ctrl = "event_ctrl",
+      n_int = "n_int",
+      n_ctrl = "n_ctrl",
+      likelihood = "binomial",
+      estimand = "RD",
+      model_type = "common_effect",
+      stage = "two_stage",
+      mu_prior = priors$binary$mu)
+
+```
+
+::: panel-tabset
+## Forest Plot
+
+```{r, warning=FALSE}
+#| fig-height: 5
+#| fig-width: 10
+#| out-width: "100%"
+
+forest(model = fit_res24_ce,
+       data = dat_res24,
+       estimand = "RD",
+       studyvar = "Author",
+       year = "year",
+       i_event = "event_int_raw",
+       c_event = "event_ctrl_raw",
+       c_n = "n_ctrl_raw",
+       i_n = "n_int_raw",
+       label_intervention = "BMES",
+       label_control = "0.9% NaCl",
+       xlim = c(-0.3, 0.3),
+       reverse_arm_labels = TRUE)
+```
+
+## Overall Plot
+
+```{r, warning=FALSE}
+#| fig-height: 4
+#| fig-width: 9
+#| out-width: "70%"
+#| fig-align: center
+
+# tau categories based on Spiegelhalter
+
+bayesma::overall_plot(model = fit_res24_ce,
+                      estimand = "RD",
+                      add_tau = FALSE,
+                      add_mu_prior = TRUE,
+                      add_tau_prior = FALSE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl",
+                      reverse_arm_labels = TRUE)
+
+```
+
+## Funnel Plot
+
+```{r, warning=FALSE}
+#| fig-cap: "Funnel plot for proportion of DKA resolution at 24 hours."
+#| fig-height: 4
+#| fig-width: 6
+#| out-width: "50%"
+#| fig-align: center
+
+bayesma::funnel_plot(model = fit_res24_ce,
+       data = dat_res24,
+       estimand = "RD",
+       studyvar   = "Author",
+       year = "year",
+       i_event = "event_int_raw",
+       c_event = "event_ctrl_raw",
+       c_n = "n_ctrl_raw",
+       i_n  = "n_int_raw",
+       label_studies = TRUE)
+```
+
+## Bayesian Egger Regression
+
+```{r}
+#| fig-cap: "Bayesian Egger regression posterior for proportion of DKA resolution at 24 hours."
+#| fig-height: 5
+#| fig-width: 8
+#| out-width: "55%"
+#| fig-align: center
+
+egger_res24 <- bayesma::egger(
+  data = dat_res24,
+  studyvar = "Author",
+  event_int = "event_int",
+  event_ctrl = "event_ctrl",
+  n_ctrl = "n_ctrl",
+  n_int = "n_int",
+  likelihood = "binomial")
+
+bayesma::egger_plot(egger_res24, type = "beta_posterior")
 ```
 :::
 
@@ -721,8 +1036,8 @@ fit_insulin_dur_re <- bayesma(
   estimand   = "MD",
   model_type = "random_effect",
   stage      = "two_stage",
-  mu_prior   = normal(0, 1),
-  tau_prior  = half_normal(0, 0.75))
+  mu_prior   = priors$insulin_dur$mu,
+  tau_prior  = priors$insulin_dur$tau)
 
 ```
 
@@ -746,7 +1061,32 @@ forest(model = fit_insulin_dur_re,
        c_n     = "n_ctrl",
        i_n      = "n_int",
        label_intervention = "BMES",
-       label_control = "0.9% NaCl")
+       label_control = "0.9% NaCl",
+       add_pred = TRUE,
+       x_label = "Mean Difference (Hours)")
+```
+
+## Overall Plot
+
+```{r, warning=FALSE}
+#| fig-height: 5
+#| fig-width: 9
+#| out-width: "70%"
+#| fig-align: center
+
+# tau categories based on MCID: 0.5x MCID, MCID, 2 × MCID (hours)
+
+bayesma::overall_plot(model = fit_insulin_dur_re,
+                      estimand = "MD",
+                      add_tau = TRUE,
+                      add_mu_prior = TRUE,
+                      add_tau_prior = TRUE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl",
+                      tau_categories = list(
+                        breaks = c(3, 6, 12),
+                        labels = c("Low", "Moderate", "High", "Very high")))
+
 ```
 
 ## Funnel Plot
@@ -813,8 +1153,8 @@ fits_ae <- purrr::map(dat_ae, \(df) {
     estimand = "RR",
     model_type = "random_effect",
     stage = "two_stage",
-    mu_prior = normal(0, 1),
-    tau_prior = half_normal(0, 0.5))
+    mu_prior = priors$binary$mu,
+    tau_prior = priors$binary$tau)
 })
 
 fit_mort_re <- fits_ae[["Mortality"]]
@@ -840,7 +1180,31 @@ forest(model = fit_mort_re,
        i_n      = "n_int_raw",
        label_intervention = "BMES",
        label_control = "0.9% NaCl",
-       xlim = c(0.05, 50))
+       xlim = c(0.05, 50),
+       add_pred = TRUE)
+```
+
+## Overall Plot
+
+```{r, warning=FALSE}
+#| fig-height: 5
+#| fig-width: 9
+#| out-width: "70%"
+#| fig-align: center
+
+# tau categories based on Spiegelhalter
+
+bayesma::overall_plot(model = fit_mort_re,
+                      estimand = "MD",
+                      add_tau = TRUE,
+                      add_mu_prior = TRUE,
+                      add_tau_prior = TRUE,
+                      label_intervention = "BMES",
+                      label_control = "0.9% NaCl",
+                      tau_categories = list(
+                        breaks = c(0.1, 0.5, 1),
+                        labels = c("Low", "Moderate", "High", "Very high")))
+
 ```
 
 ## Funnel Plot
@@ -867,15 +1231,15 @@ bayesma::funnel_plot(model = fit_mort_re,
 ## Bayesian Egger Regression
 
 ```{r}
-#| fig-cap: "Bayesian Egger regression and funnel plot for hospital LOS."
+#| fig-cap: "Bayesian Egger regression posterior for mortality."
 #| fig-height: 5
 #| fig-width: 8
 #| out-width: "55%"
 #| fig-align: center
 
 egger_mort <- bayesma::egger(
-  data = dat_mortality,
-  studyvar = "Author",
+  data = dat_ae$Mortality,
+  studyvar = "study_id",
   event_int = "event_int",
   event_ctrl = "event_ctrl",
   n_ctrl     = "n_ctrl",
@@ -896,38 +1260,46 @@ tbl_summary <- dplyr::bind_rows(
   dplyr::bind_rows(
     summary_row(fit_icu_los_re, "ICU LOS", "MD", "hours"),
     summary_row(fit_dka_res_re, "Time to DKA resolution", "MD", "hours"),
+    res_row(fit_res24_ce, "DKA resolution at 24 hours"),
     summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours"),
     summary_row(fits_ae$Mortality, "Mortality", "RR", "", ratio = TRUE) |>
       dplyr::mutate(ess = TRUE)) |>
-    dplyr::mutate(Group = "Secondary")) |> 
-  dplyr::mutate(ess = dplyr::coalesce(ess, FALSE)) |>
+    dplyr::mutate(Group = "Secondary")) |>
+  dplyr::mutate(
+    ess = dplyr::coalesce(ess, FALSE),
+    ce = dplyr::coalesce(ce, FALSE)) |>
   dplyr::relocate(Group)
 
 outcome_col <- names(tbl_summary)[2]
 
 tbl_summary |>
   gt::gt(groupname_col = "Group") |>
-  gt::cols_hide(ess) |>
+  gt::cols_hide(c(ess, ce)) |>
   gt::tab_header(
     title = gt::md("**BMES vs 0.9% NaCl: pooled effects**"),
-    subtitle = "Bayesian random-effects meta-analysis") |>
+    subtitle = "Bayesian meta-analysis") |>
   gt::fmt_number(columns = dplyr::starts_with("Pr("), decimals = 2) |>
   gt::tab_footnote(
-    "Posterior probability the effect favours BMES (shorter stay/duration, lower mortality).",
+    "Posterior probability the effect favours BMES (shorter stay/duration, more patients resolved, lower mortality).",
     locations = gt::cells_column_labels(`Pr(Benefit)`)) |>
   gt::tab_footnote(
     "Cluster crossover trials adjusted using effective sample size.",
     locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ess)) |>
+  gt::tab_footnote(
+    "Common-effect model (four trials); all other outcomes random-effects.",
+    locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ce)) |>
   gt::sub_missing(missing_text = "\u2014")
-
 ```
 
 ## Adverse Events
 
 Pooled counts of trial-reported adverse events, with a two-stage Bayesian
-random-effects risk ratio (binomial likelihood, priors as for other binary
-outcomes: $\mu \sim N(0, 1)$, $\tau \sim \text{HN}(0, 0.75)$) fitted to each
-event. RR < 1 favours balanced crystalloid (BMES). 
+random-effects risk ratio (binomial likelihood; $\mu \sim N(0, 1)$,
+$\tau \sim \text{HN}(0, 0.5)$ on the log-RR scale) fitted to each event.
+Cluster crossover trials were adjusted using effective sample size. RR < 1
+favours BMES. Apart from mortality, these adverse events were not
+prespecified and were analysed post hoc; the outcome definitions reported
+by each trial were used.
 
 ```{r, warning=FALSE}
 #| label: tbl-adverse-events
@@ -955,7 +1327,7 @@ fits_ae |>
       gt::cell_borders(sides = "bottom", weight = gt::px(2), color = "black")),
     locations = gt::cells_column_labels(columns = dplyr::everything())) |>
   gt::tab_footnote(
-    "Trials reporting the event (trials contributing to the model; trials with no events in either arm excluded).",
+    "Trials reporting the event.",
     locations = gt::cells_column_labels(`Number of Trials`)) |>
   gt::tab_footnote(
     "Crude event counts, not adjusted for clustering.",
@@ -980,16 +1352,23 @@ dplyr::bind_rows(
   dplyr::bind_rows(
     summary_row(fit_icu_los_re, "ICU LOS", "MD", "hours"),
     summary_row(fit_dka_res_re, "Time to DKA resolution", "MD", "hours"),
-    summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours")) |>
+    res_row(fit_res24_ce, "DKA resolution at 24 hours"),
+    summary_row(fit_insulin_dur_re, "Duration of insulin infusion", "MD", "hours"),
+    summary_row(fits_ae$Mortality, "Mortality", "RR", NA , ratio = TRUE) |>
+      dplyr::mutate(ess = TRUE)) |>
     dplyr::mutate(Group = "Secondary"),
-  fits_ae |>
-    purrr::imap(\(fit, ev) summary_row(fit, ev, "RR", "", ratio = TRUE)) |>
+  fits_ae[names(fits_ae) != "Mortality"] |>
+    purrr::imap(\(fit, ev) summary_row(fit, ev, "RR", NA , ratio = TRUE)) |>
     purrr::list_rbind() |>
-    dplyr::mutate(Group = "Adverse events")) |>
+    dplyr::mutate(Group = "Adverse events", ess = TRUE)) |>
+  dplyr::mutate(
+    ess = dplyr::coalesce(ess, FALSE),
+    ce = dplyr::coalesce(ce, FALSE)) |>
   dplyr::relocate(Group) |>
   gt::gt(groupname_col = "Group") |>
+  gt::cols_hide(c(ess, ce)) |>
   gt::tab_header(
-    title = gt::md("**BMES vs 0.9% NaCl: Outcome and Adverse Events**")) |>
+    title = gt::md("**BMES vs 0.9% NaCl: Outcomes and Adverse Events**")) |>
   gt::fmt_number(columns = dplyr::starts_with("Pr("), decimals = 2) |>
   gt::tab_options(
     table.border.top.width = gt::px(2),
@@ -1013,8 +1392,14 @@ dplyr::bind_rows(
       gt::cell_borders(sides = "bottom", weight = gt::px(2.5), color = "black")),
     locations = gt::cells_row_groups(groups = dplyr::everything())) |>
   gt::tab_footnote(
-    "Posterior probability the effect favours BMES (shorter stay/duration, fewer adverse events).",
+    "Posterior probability the effect favours BMES (shorter stay/duration, more patients resolved, lower mortality, fewer adverse events).",
     locations = gt::cells_column_labels(`Pr(Benefit)`)) |>
+  gt::tab_footnote(
+    "Cluster crossover trials adjusted using effective sample size.",
+    locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ess)) |>
+  gt::tab_footnote(
+    "Common-effect model (four trials); estimand is the marginal risk difference",
+    locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ce)) |>
   gt::sub_missing(missing_text = "\u2014")
 ```
 
@@ -1077,14 +1462,51 @@ overall_plot(fit_hosp_los_re, add_mu = FALSE, add_tau = TRUE, estimand = "MD")
 
 ```
 
+For the secondary continuous outcomes, prior dominance was assessed in the
+same way, using a grid of $\tau$ priors at 0.5, 1 and 2 times the
+weakly regularising scale.
+
+```{r}
+#| label: tbl-prior-dominance-secondary
+
+pd_secondary <- list(
+  `ICU LOS` = list(fit = fit_icu_los_re, data = dat_icu_los, key = "icu_los"),
+  `Time to DKA resolution` = list(fit = fit_dka_res_re, data = dat_time_res, key = "time_res"),
+  `Duration of insulin infusion` = list(fit = fit_insulin_dur_re, data = dat_insulin_dur, key = "insulin_dur")) |>
+  purrr::map(\(x) {
+    prior_dominance(
+      x$fit,
+      data = x$data,
+      tau_grid = 0.5 * ext_sd[[x$key]] * c(0.5, 1, 2))
+  })
+
+pd_secondary |>
+  purrr::imap(\(pd, nm) {
+    tibble::tibble(
+      Outcome = nm,
+      Parameter = pd$contraction$parameter,
+      Contraction = pd$contraction$contraction,
+      `Prior percentile` = pd$percentile$prior_percentile[match(pd$contraction$parameter, pd$percentile$parameter)],
+      Flag = pd$percentile$flag[match(pd$contraction$parameter, pd$percentile$parameter)])
+  }) |>
+  purrr::list_rbind() |>
+  gt::gt(groupname_col = "Outcome") |>
+  gt::fmt_number(columns = Contraction, decimals = 2) |>
+  gt::fmt_percent(columns = `Prior percentile`, decimals = 0) |>
+  gt::tab_header(title = gt::md("**Prior dominance: secondary continuous outcomes**")) |>
+  style_gt()
+```
+
 ## Sensitivity Analysis
 
 The robustness of the primary estimate was assessed against (i)
 alternative estimands — difference in medians, ratio of medians, and
 mean difference using alternative median-to-mean conversion methods;
-(ii) alternative model specifications; (iii) alternative priors for
-$\mu$ — vague $N(0, 3)$ and informative $N(-0.5, 0.30)$ days, with
-$\tau \sim \text{HN}(0, 0.75)$ unchanged; (iv) exclusion of trials at
+(ii) alternative model specifications; (iii) alternative priors —
+weakly regularising ($\mu \sim N(0, 3.2)$, $\tau \sim \text{HN}(0, 1.6)$
+days, scaled to the SD of hospital length of stay in an external DKA
+cohort) and informative ($\mu \sim N(-0.5, 0.30)$ days, with
+$\tau \sim \text{HN}(0, 0.75)$); (iv) exclusion of trials at
 high risk of bias (protocol 2.8.9); and (v) the specification of the
 heterogeneity prior.
 
@@ -1185,7 +1607,7 @@ est_row <- function(fit, estimand, method, mcid, ratio = FALSE) {
   tibble::tibble(
     Estimand = estimand,
     Method = method,
-    k = nrow(fit$data),
+    k = sum(grepl("^theta\\[", names(fit$draws))),
     `Estimate [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", q[1], q[2], q[3]),
     `Pr(Benefit)` = mean(mu < 0),
     `Pr(Benefit > MCID)` = mean(mu < mcid))
@@ -1245,14 +1667,14 @@ dplyr::bind_rows(
 #| out-width: "100%"
 
 priors_sens <- list(
-  vague = list(
-    name = "Vague",
-    mu_prior = normal(0, 3),
-    tau_prior = half_normal(0, 0.75)),
+  primary = list(
+    name = "Primary (prespecified)",
+    mu_prior = priors$hosp_los$mu,
+    tau_prior = priors$hosp_los$tau),
   weak_reg = list(
     name = "Weakly Regularising",
-    mu_prior = normal(0, 1),
-    tau_prior = half_normal(0, 0.75)),
+    mu_prior = priors$hosp_los_wr$mu,
+    tau_prior = priors$hosp_los_wr$tau),
   informative = list(
     name = "Informative",
     mu_prior = normal(-0.5, 0.3),
@@ -1267,7 +1689,7 @@ bayesma::sensitivity_plot(
   incl_random_effect = TRUE,
   exclude_high_rob = TRUE,
   rob_var = Overall,
-  prior_order = c("vague", "weak_reg", "informative"),
+  prior_order = c("primary", "weak_reg", "informative"),
   label_intervention = "BMES",
   label_control = "0.9% NaCl",
   add_null_range = TRUE,
@@ -1336,10 +1758,7 @@ bayesma::ecdf_model_plot(
   model = fit_hosp_los_re,
   data = dat_hosp_los,
   estimand = "MD",
-  prior <-  list(
-    name = "Weakly Regularising",
-    mu_prior = normal(0, 1),
-    tau_prior = half_cauchy(0, 0.5)),
+  prior = priors_sens$primary,
   rob_var = "Overall",
   label_intervention = "BMES",
   label_control = "0.9% NaCl",
@@ -1348,6 +1767,106 @@ bayesma::ecdf_model_plot(
   incl_random_effect = TRUE)
 ```
 :::
+
+## GRADE Summary of Findings
+
+```{r, warning=FALSE}
+trial_kn <- function(data) {
+  data <- if ("event_int_raw" %in% names(data)) dplyr::filter(data, !is.na(event_int_raw)) else data
+  n <- if ("n_int_raw" %in% names(data)) data$n_int_raw + data$n_ctrl_raw else data$n_int + data$n_ctrl
+  sprintf("%s (%d)", format(sum(n), big.mark = ","), nrow(data))
+}
+
+ctrl_mean <- function(data) stats::weighted.mean(data$mean_ctrl, data$n_ctrl)
+ctrl_risk <- function(data) 1000 * sum(data$event_ctrl_raw) / sum(data$n_ctrl_raw)
+
+sof_row <- function(draws, data, outcome, type, baseline, mcid = NA_real_, certainty, comment = NA_character_, higher_better = FALSE) {
+  q <- function(x) stats::quantile(x, c(0.5, 0.025, 0.975), names = FALSE)
+  p0 <- baseline / 1000
+  out <- switch(type,
+    md = list(
+      ctrl = sprintf("%.1f", baseline),
+      int = q(baseline + draws),
+      eff = draws,
+      rel = sprintf("MD %.2f (%.2f to %.2f)", q(draws)[1], q(draws)[2], q(draws)[3]),
+      fmt = "%.1f (%.1f to %.1f)"),
+    rr = list(
+      ctrl = sprintf("%.0f per 1000", baseline),
+      int = q(baseline * exp(draws)),
+      eff = draws,
+      rel = sprintf("RR %.2f (%.2f to %.2f)", exp(q(draws))[1], exp(q(draws))[2], exp(q(draws))[3]),
+      fmt = "%.0f per 1000 (%.0f to %.0f)"),
+    or = list(
+      ctrl = sprintf("%.0f per 1000", baseline),
+      int = q(1000 * stats::plogis(stats::qlogis(p0) + draws)),
+      eff = stats::plogis(stats::qlogis(p0) + draws) - p0,
+      rel = sprintf("OR %.2f (%.2f to %.2f)", exp(q(draws))[1], exp(q(draws))[2], exp(q(draws))[3]),
+      fmt = "%.0f per 1000 (%.0f to %.0f)"))
+  benefit <- if (higher_better) out$eff else -out$eff
+  tibble::tibble(
+    Outcome = outcome,
+    `Risk with saline` = out$ctrl,
+    `Risk with BMES (95% CrI)` = sprintf(out$fmt, out$int[1], out$int[2], out$int[3]),
+    `Relative effect (95% CrI)` = out$rel,
+    `Pr(Benefit)` = mean(benefit > 0),
+    `Pr(Benefit > MCID)` = if (is.na(mcid)) NA_real_ else mean(benefit > mcid),
+    `Participants (trials)` = trial_kn(data),
+    Certainty = certainty,
+    Comments = comment)
+}
+
+grade_sym <- function(x) {
+  dplyr::case_match(x,
+    "High" ~ "\u2295\u2295\u2295\u2295 High",
+    "Moderate" ~ "\u2295\u2295\u2295\u25EF Moderate",
+    "Low" ~ "\u2295\u2295\u25EF\u25EF Low",
+    "Very low" ~ "\u2295\u25EF\u25EF\u25EF Very low")
+}
+
+tbl_sof <- dplyr::bind_rows(
+  sof_row(fit_hosp_los_re$draws$mu, dat_hosp_los, "Hospital LOS (days)", "md", 3.75, mcid = 0.5,
+    certainty = "Moderate", comment = "Downgraded for risk of bias and imprecision"),
+  sof_row(fit_icu_los_re$draws$mu, dat_icu_los, "ICU LOS (hours)", "md", 41.6, mcid = 6,
+    certainty = "Very low", comment = "Downgraded for risk of bias, inconsistency and imprecision"),
+  sof_row(fit_dka_res_re$draws$mu, dat_time_res, "Time to DKA resolution (hours)", "md", ctrl_mean(dat_time_res), mcid = 6,
+    certainty = "Low"),
+  sof_row(fit_res24_ce$draws$mu, dat_res24, "DKA resolution at 24 hours", "or", ctrl_risk(dat_res24), mcid = 0.10,
+    certainty = "Low", higher_better = TRUE),
+  sof_row(fit_insulin_dur_re$draws$mu, dat_insulin_dur, "Duration of insulin infusion (hours)", "md", 42, mcid = 6,
+    certainty = "Low"),
+  sof_row(fits_ae$Mortality$draws$mu, dat_ae$Mortality, "Mortality", "rr", 14,
+    certainty = "Low")) |>
+  dplyr::mutate(Certainty = grade_sym(Certainty))
+
+tbl_sof |>
+  gt::gt() |>
+  gt::tab_header(title = gt::md("**Summary of Findings and Certainty of Evidence: Balanced Multielectrolyte Solution Compared with 0.9% Saline for Patients with DKA**")) |>
+  gt::tab_spanner(
+    label = "Anticipated absolute effects",
+    columns = c(`Risk with saline`, `Risk with BMES (95% CrI)`)) |>
+  gt::fmt_number(columns = dplyr::starts_with("Pr("), decimals = 2) |>
+  gt::sub_missing(missing_text = "\u2014") |>
+  style_gt() |>
+  gt::tab_footnote(
+  "Baseline values: hospital and ICU LOS (medians) and mortality from Venkatesh (2015); insulin infusion duration from Chua (2012); time to DKA resolution (participant-weighted mean) and resolution at 24 hours (pooled proportion) from the saline arms of included trials.",
+  locations = gt::cells_column_labels(`Risk with saline`)) |>
+  gt::tab_footnote(
+    "Saline baseline plus the pooled effect applied to each posterior draw; the baseline is treated as fixed. For LOS outcomes, the mean difference is applied to a median baseline.",
+    locations = gt::cells_column_labels(`Risk with BMES (95% CrI)`)) |>
+  gt::tab_footnote(
+    "Posterior probability the effect favours BMES (shorter stay/duration, more patients resolved, lower mortality).",
+    locations = gt::cells_column_labels(`Pr(Benefit)`)) |>
+  gt::tab_footnote(
+    "MCID: 0.5 days for hospital LOS; 6 hours for ICU LOS, time to DKA resolution and insulin infusion duration; 10% absolute difference for resolution at 24 hours (at the saline baseline). No MCID for mortality (any difference considered important).",
+    locations = gt::cells_column_labels(`Pr(Benefit > MCID)`)) |>
+  gt::tab_footnote(
+    "Common-effect model; odds ratio applied to the saline baseline.",
+    locations = gt::cells_body(columns = Outcome, rows = Outcome == "DKA resolution at 24 hours")) |>
+  gt::tab_footnote(
+    "Cluster crossover trials adjusted using effective sample size; participant counts are unadjusted.",
+    locations = gt::cells_body(columns = Outcome, rows = Outcome %in% c("DKA resolution at 24 hours", "Mortality")))
+```
+
 
 ## Model Diagnostics
 
@@ -1452,6 +1971,39 @@ bayesma::diagnostics(fit_dka_res_re,
 #| fig-align: center
 
 bayesma::diagnostics(fit_dka_res_re,
+                     panels  = c("trace", "ppc"),
+                     layout  = "vertical") 
+```
+:::
+
+## Proportion of DKA resolution at 24 hours
+
+::: panel-tabset
+
+## Table
+
+```{r, warning=FALSE}
+#| fig-cap: "Convergence diagnostics: DKA resolution at 24 hours"
+#| fig-height: 4
+#| fig-width: 6
+#| out-width: "70%"
+#| fig-align: center
+
+bayesma::diagnostics(fit_res24_ce,
+                     panels  = c("table")) 
+
+```
+
+## Plots
+
+```{r, warning=FALSE}
+#| fig-cap: "Convergence diagnostics: DKA resolution at 24 hours"
+#| fig-height: 4
+#| fig-width: 6
+#| out-width: "70%"
+#| fig-align: center
+
+bayesma::diagnostics(fit_res24_ce,
                      panels  = c("trace", "ppc"),
                      layout  = "vertical") 
 ```

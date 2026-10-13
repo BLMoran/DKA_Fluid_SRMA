@@ -209,6 +209,38 @@ dat_icu_los <- build_dataset(dat, "icu_los", "n_icu_los_int", "n_icu_los_ctrl", 
 dat_time_res <- build_dataset(dat, "time_res", "n_analysed_int", "n_analysed_ctrl", convert_mean = TRUE, mean_method = "wan")
 dat_insulin_dur <- build_dataset(dat, "insulin_dur", "N_insulin_dur_int", "N_insulin_dur_ctrl", convert_mean = TRUE, mean_method = "wan")
 
+build_res_dataset <- function(data, hour) {
+  n_int <- paste0("N_prop_res", hour, "_int")
+  n_ctrl <- paste0("N_prop_res", hour, "_ctrl")
+  e_int <- paste0("prop_res", hour, "_int")
+  e_ctrl <- paste0("prop_res", hour, "_ctrl")
+  
+  data |>
+    dplyr::filter(!is.na(.data[[e_int]]), !is.na(.data[[e_ctrl]])) |>
+    dplyr::mutate(
+      rho_w = dplyr::coalesce(time_res_rho_w, rho_w),
+      rho_b = dplyr::coalesce(time_res_rho_b, rho_b, 0),
+      m = (.data[[n_int]] + .data[[n_ctrl]]) / (n_clusters * n_periods),
+      deff = dplyr::coalesce(design_effect(design, m, rho_w, rho_b, NA_real_), 1),
+      event_int_raw = as.integer(.data[[e_int]]),
+      n_int_raw = as.integer(.data[[n_int]]),
+      event_ctrl_raw = as.integer(.data[[e_ctrl]]),
+      n_ctrl_raw = as.integer(.data[[n_ctrl]]),
+      i_summary = sprintf("%d/%d (%.1f%%)", event_int_raw, n_int_raw, 100 * event_int_raw / n_int_raw),
+      c_summary = sprintf("%d/%d (%.1f%%)", event_ctrl_raw, n_ctrl_raw, 100 * event_ctrl_raw / n_ctrl_raw),
+      # Effective sample size (Cochrane Handbook 23.1.4)
+      event_int = round(event_int_raw / deff),
+      n_int = round(n_int_raw / deff),
+      event_ctrl = round(event_ctrl_raw / deff),
+      n_ctrl = round(n_ctrl_raw / deff)) |>
+    dplyr::select(
+      study_id, Author, year, design, deff, i_summary, c_summary,
+      event_int, n_int, event_ctrl, n_ctrl,
+      event_int_raw, n_int_raw, event_ctrl_raw, n_ctrl_raw, D1:Overall)
+}
+
+dat_res24 <- build_res_dataset(dat, 24)
+
 # Mortality outcome (binary)
 opt_col <- function(data, x) if (x %in% names(data)) data[[x]] else NA_real_
 
@@ -338,6 +370,7 @@ save_rds(dat, "dat")
 save_rds(dat_hosp_los, "dat_hosp_los")
 save_rds(dat_icu_los, "dat_icu_los")
 save_rds(dat_time_res, "dat_time_res")
+save_rds(dat_res24, "dat_res24")
 save_rds(dat_insulin_dur, "dat_insulin_dur")
 save_rds(dat_mortality, "dat_mortality")
 save_rds(dat_hosp_los_dom, "dat_hosp_los_dom")

@@ -22,7 +22,7 @@
 .bma_detect <- function(d, mu_par = NULL, tau_par = NULL) {
   nm <- names(d)
   list(
-    mu  = mu_par  %||% intersect(c("mu", "pooled", "theta", "d"), nm)[1],
+    mu = mu_par  %||% intersect(c("mu", "pooled", "theta", "d"), nm)[1],
     tau = tau_par %||% intersect(c("tau", "sigma_re", "sd_re"), nm)[1]
   )
 }
@@ -35,7 +35,7 @@
   if (is.call(args)) args <- as.list(args)[-1]
   
   new <- list(...)
-  args[names(new)] <- new          # replace (not merge) priors / settings
+  args[names(new)] <- new 
   
   if (is.null(args$data))
     stop("`meta$call_args` has no `data`; pass `data = <your data>` via `...`.")
@@ -48,29 +48,29 @@
 .bma_summ <- function(v, prefix) {
   tibble::tibble(
     !!paste0(prefix, "_median") := stats::median(v),
-    !!paste0(prefix, "_lo")     := stats::quantile(v, .025, names = FALSE),
-    !!paste0(prefix, "_hi")     := stats::quantile(v, .975, names = FALSE)
+    !!paste0(prefix, "_lo") := stats::quantile(v, .025, names = FALSE),
+    !!paste0(prefix, "_hi") := stats::quantile(v, .975, names = FALSE)
   )
 }
 
 
 #' @export
 prior_dominance <- function(fit,
-                            prior_draws   = NULL,
-                            mu_par        = NULL,
-                            tau_par       = NULL,
-                            tau_grid      = c(0.5, 0.75, 1.5),
+                            prior_draws = NULL,
+                            mu_par = NULL,
+                            tau_par = NULL,
+                            tau_grid = c(0.5, 0.75, 1.5),
                             tau_prior_fun = function(s) bayesma::half_normal(0, s),
-                            call          = NULL,
-                            env           = globalenv(),
+                            call = NULL,
+                            env = globalenv(),
                             ...) {
   
   post <- .bma_draws(fit)
-  p    <- .bma_detect(post, mu_par, tau_par)
+  p <- .bma_detect(post, mu_par, tau_par)
   if (is.na(p$mu) || is.na(p$tau))
     stop("Could not locate mu / tau draws. Pass mu_par / tau_par explicitly.")
   
-  post_mu  <- post[[p$mu]]
+  post_mu <- post[[p$mu]]
   post_tau <- post[[p$tau]]
   
   if (is.null(prior_draws))
@@ -88,18 +88,18 @@ prior_dominance <- function(fit,
     1 - stats::var(post, na.rm = TRUE) / pv
   }
   interp <- function(c) dplyr::case_when(
-    is.na(c)  ~ "improper prior - undefined",
+    is.na(c) ~ "improper prior - undefined",
     c >= 0.75 ~ "data-dominated",
     c >= 0.30 ~ "informed by both",
-    TRUE      ~ "prior-dominated")
+    TRUE ~ "prior-dominated")
   
   cmu  <- contraction_of(prior_mu,  post_mu)
   ctau <- contraction_of(prior_tau, post_tau)
   contraction <- tibble::tibble(
-    parameter      = c("mu", "tau"),
-    prior_var      = c(stats::var(prior_mu), stats::var(prior_tau)),
-    posterior_var  = c(stats::var(post_mu),  stats::var(post_tau)),
-    contraction    = c(cmu, ctau),
+    parameter = c("mu", "tau"),
+    prior_var = c(stats::var(prior_mu), stats::var(prior_tau)),
+    posterior_var = c(stats::var(post_mu),  stats::var(post_tau)),
+    contraction = c(cmu, ctau),
     interpretation = interp(c(cmu, ctau)))
   
   # ---- 2. prior percentile at posterior median ----
@@ -107,13 +107,13 @@ prior_dominance <- function(fit,
   pmu  <- pct(prior_mu,  stats::median(post_mu))
   ptau <- pct(prior_tau, stats::median(post_tau))
   percentile <- tibble::tibble(
-    parameter        = c("mu", "tau"),
+    parameter = c("mu", "tau"),
     posterior_median = c(stats::median(post_mu), stats::median(post_tau)),
     prior_percentile = c(pmu, ptau),
-    flag             = dplyr::case_when(
+    flag = dplyr::case_when(
       c(pmu, ptau) > 0.95 ~ "upper tail - possible prior-data conflict",
       c(pmu, ptau) < 0.05 ~ "lower tail - possible prior-data conflict",
-      TRUE                ~ "interior - no conflict"))
+      TRUE ~ "interior - no conflict"))
   
   # ---- 3. tau grid ----
   tau_sensitivity <- NULL
@@ -150,12 +150,12 @@ prior_dominance <- function(fit,
 
 #' @export
 prior_scale_sweep <- function(fit,
-                              scales       = c(0.1, 0.25, 0.5, 1, 2, 5),
-                              prior_mean   = 0,
-                              mu_par       = NULL,
+                              scales = c(0.1, 0.25, 0.5, 1, 2, 5),
+                              prior_mean = 0,
+                              mu_par = NULL,
                               mu_prior_fun = function(m, s) bayesma::normal(m, s),
-                              call         = NULL,
-                              env          = globalenv(),
+                              call = NULL,
+                              env = globalenv(),
                               ...) {
   mu_par <- .bma_detect(.bma_draws(fit), mu_par)$mu
   
@@ -173,12 +173,12 @@ prior_scale_sweep <- function(fit,
 
 #' @export
 tau_scale_sweep <- function(fit,
-                            scales        = c(0.25, 0.5, 0.75, 1, 1.5, 3),
-                            mu_par        = NULL,
-                            tau_par       = NULL,
+                            scales = c(0.25, 0.5, 0.75, 1, 1.5, 3),
+                            mu_par = NULL,
+                            tau_par = NULL,
                             tau_prior_fun = function(s) bayesma::half_normal(0, s),
-                            call          = NULL,
-                            env           = globalenv(),
+                            call = NULL,
+                            env = globalenv(),
                             ...) {
   p <- .bma_detect(.bma_draws(fit), mu_par, tau_par)
   
@@ -227,10 +227,10 @@ prior_ess <- function(fit, data = NULL, se_col = "sei", typical_se = NULL,
   study_prec  <- 1 / typical_se^2
   data_prec   <- if (!is.na(k)) k * study_prec else NA_real_
   
-  structure(list(prior_sd    = prior_sd,
-                 typical_se  = typical_se,
-                 prior_ess   = prior_prec / study_prec,
-                 k           = k,
+  structure(list(prior_sd = prior_sd,
+                 typical_se = typical_se,
+                 prior_ess = prior_prec / study_prec,
+                 k = k,
                  prior_share = if (!is.na(data_prec)) prior_prec / (prior_prec + data_prec) else NA_real_),
             class = "prior_ess")
 }
@@ -370,17 +370,17 @@ build_dataset <- function(data,
   base <- data |>
     dplyr::mutate(
       mean.g1 = .data[[col("_mean_int")]],
-      sd.g1   = .data[[col("_sd_int")]],
-      med.g1  = .data[[col("_median_int")]],
-      iqr.g1  = split_iqr(.data[[col("_iqr_int")]]),
-      n.g1    = dplyr::coalesce(.data[[n_int_col]], n_analysed_int),
+      sd.g1 = .data[[col("_sd_int")]],
+      med.g1 = .data[[col("_median_int")]],
+      iqr.g1 = split_iqr(.data[[col("_iqr_int")]]),
+      n.g1 = dplyr::coalesce(.data[[n_int_col]], n_analysed_int),
       mean.g2 = .data[[col("_mean_ctrl")]],
-      sd.g2   = .data[[col("_sd_ctrl")]],
-      med.g2  = .data[[col("_median_ctrl")]],
-      iqr.g2  = split_iqr(.data[[col("_iqr_ctrl")]]),
-      n.g2    = dplyr::coalesce(.data[[n_ctrl_col]], n_analysed_ctrl),
-      rho_w   = dplyr::coalesce(opt_col(col("_rho_w")), rho_w),
-      rho_b   = dplyr::coalesce(opt_col(col("_rho_b")), rho_b)) |>
+      sd.g2 = .data[[col("_sd_ctrl")]],
+      med.g2 = .data[[col("_median_ctrl")]],
+      iqr.g2 = split_iqr(.data[[col("_iqr_ctrl")]]),
+      n.g2 = dplyr::coalesce(.data[[n_ctrl_col]], n_analysed_ctrl),
+      rho_w = dplyr::coalesce(opt_col(col("_rho_w")), rho_w),
+      rho_b = dplyr::coalesce(opt_col(col("_rho_b")), rho_b)) |>
     tidyr::unpack(c(iqr.g1, iqr.g2), names_sep = "_") |>
     dplyr::rename(
       q1.g1 = iqr.g1_q1,
@@ -389,17 +389,17 @@ build_dataset <- function(data,
       q3.g2 = iqr.g2_q3) |>
     dplyr::mutate(
       mean.g1 = if (convert_mean) mean.g1 else NA_real_,
-      sd.g1   = if (convert_mean) sd.g1   else NA_real_,
+      sd.g1 = if (convert_mean) sd.g1   else NA_real_,
       mean.g2 = if (convert_mean) mean.g2 else NA_real_,
-      sd.g2   = if (convert_mean) sd.g2   else NA_real_,
-      min.g1  = NA_real_,
-      max.g1  = NA_real_,
-      min.g2  = NA_real_,
-      max.g2  = NA_real_,
-      m       = (n.g1 + n.g2) / (n_clusters * n_periods),
-      deff    = dplyr::coalesce(1 + (m - 1) * rho_w - m * dplyr::coalesce(rho_b, 0), 1),
-      ok.g1   = !is.na(n.g1) & ((!is.na(mean.g1) & !is.na(sd.g1)) | (!is.na(med.g1) & !is.na(q1.g1) & !is.na(q3.g1))),
-      ok.g2   = !is.na(n.g2) & ((!is.na(mean.g2) & !is.na(sd.g2)) | (!is.na(med.g2) & !is.na(q1.g2) & !is.na(q3.g2)))) |>
+      sd.g2 = if (convert_mean) sd.g2   else NA_real_,
+      min.g1 = NA_real_,
+      max.g1 = NA_real_,
+      min.g2 = NA_real_,
+      max.g2 = NA_real_,
+      m = (n.g1 + n.g2) / (n_clusters * n_periods),
+      deff = dplyr::coalesce(1 + (m - 1) * rho_w - m * dplyr::coalesce(rho_b, 0), 1),
+      ok.g1 = !is.na(n.g1) & ((!is.na(mean.g1) & !is.na(sd.g1)) | (!is.na(med.g1) & !is.na(q1.g1) & !is.na(q3.g1))),
+      ok.g2 = !is.na(n.g2) & ((!is.na(mean.g2) & !is.na(sd.g2)) | (!is.na(med.g2) & !is.na(q1.g2) & !is.na(q3.g2)))) |>
     dplyr::filter(ok.g1, ok.g2)
   
   dat_mm <- base |>
@@ -421,16 +421,16 @@ build_dataset <- function(data,
         
         reported <- tibble::tibble(
           study_id = d$study_id[has_ms],
-          mean     = d$mean.g1[has_ms],
-          sd       = d$sd.g1[has_ms])
+          mean = d$mean.g1[has_ms],
+          sd = d$sd.g1[has_ms])
         
         converted <- if (any(!has_ms)) {
           d_conv <- d[!has_ms, ]
           r <- metamedian::metamean(d_conv, mean_method = mean_method, pool_studies = FALSE)
           tibble::tibble(
             study_id = d_conv$study_id,
-            mean     = r$yi,
-            sd       = r$sei * sqrt(d_conv$n.g1))
+            mean = r$yi,
+            sd = r$sei * sqrt(d_conv$n.g1))
         } else {
           tibble::tibble(study_id = d$study_id[0], mean = numeric(), sd = numeric())
         }
@@ -446,17 +446,17 @@ build_dataset <- function(data,
       dplyr::inner_join(arm_est, by = "study_id") |>
       dplyr::filter(!is.na(mean_int), !is.na(sd_int), !is.na(mean_ctrl), !is.na(sd_ctrl)) |>
       dplyr::mutate(
-        n_int     = n.g1,
-        n_ctrl    = n.g2,
+        n_int = n.g1,
+        n_ctrl = n.g2,
         age_group = as.character(age_group),
         i_summary = sprintf("%.2f (%.2f)", mean_int, sd_int),
         c_summary = sprintf("%.2f (%.2f)", mean_ctrl, sd_ctrl),
         # Design effect
-        sd_int    = sd_int  * sqrt(deff),
-        sd_ctrl   = sd_ctrl * sqrt(deff),
-        yi        = mean_int - mean_ctrl,
-        sei       = sqrt(sd_int^2 / n_int + sd_ctrl^2 / n_ctrl),
-        vi        = sei^2) |>
+        sd_int = sd_int  * sqrt(deff),
+        sd_ctrl = sd_ctrl * sqrt(deff),
+        yi = mean_int - mean_ctrl,
+        sei = sqrt(sd_int^2 / n_int + sd_ctrl^2 / n_ctrl),
+        vi = sei^2) |>
       dplyr::select(
         study_id, Author, year, bmes_type, age_group, n_int, n_ctrl, yi, sei, vi,
         i_summary, c_summary, mean_int, sd_int, mean_ctrl, sd_ctrl, deff,
@@ -468,26 +468,26 @@ build_dataset <- function(data,
     
     tibble::tibble(
       study_id = dat_mm$study_id,
-      yi       = res$yi,
-      sei      = res$sei) |>
+      yi = res$yi,
+      sei = res$sei) |>
       dplyr::left_join(base, by = "study_id") |>
       dplyr::filter(!is.na(yi), !is.na(sei)) |>
       dplyr::mutate(
-        sei         = sei * sqrt(deff),
-        vi          = sei^2,
-        n_int       = n.g1,
-        n_ctrl      = n.g2,
-        age_group   = as.character(age_group),
-        i_summary   = fmt_summary(mean.g1, sd.g1, med.g1, q1.g1, q3.g1),
-        c_summary   = fmt_summary(mean.g2, sd.g2, med.g2, q1.g2, q3.g2),
+        sei = sei * sqrt(deff),
+        vi  = sei^2,
+        n_int = n.g1,
+        n_ctrl = n.g2,
+        age_group  = as.character(age_group),
+        i_summary  = fmt_summary(mean.g1, sd.g1, med.g1, q1.g1, q3.g1),
+        c_summary  = fmt_summary(mean.g2, sd.g2, med.g2, q1.g2, q3.g2),
         median_int  = med.g1,
-        q1_int      = q1.g1,
-        q3_int      = q3.g1,
-        iqr_int     = sprintf("%.2f\u2013%.2f", q1_int, q3_int),
+        q1_int = q1.g1,
+        q3_int = q3.g1,
+        iqr_int = sprintf("%.2f\u2013%.2f", q1_int, q3_int),
         median_ctrl = med.g2,
-        q1_ctrl     = q1.g2,
-        q3_ctrl     = q3.g2,
-        iqr_ctrl    = sprintf("%.2f\u2013%.2f", q1_ctrl, q3_ctrl)) |>
+        q1_ctrl = q1.g2,
+        q3_ctrl = q3.g2,
+        iqr_ctrl = sprintf("%.2f\u2013%.2f", q1_ctrl, q3_ctrl)) |>
       dplyr::select(
         study_id, Author, year, bmes_type, age_group, n_int, n_ctrl, yi, sei, vi,
         i_summary, c_summary,
@@ -549,18 +549,18 @@ fit_binary_rr <- function(data, studyvar, event_int, event_ctrl, n_int, n_ctrl,
                           mu_prior = bayesma::normal(0, 1),
                           tau_prior = bayesma::half_normal(0, 0.75)) {
   bayesma::bayesma(
-    data       = data,
-    studyvar   = studyvar,
-    event_int  = event_int,
+    data = data,
+    studyvar = studyvar,
+    event_int = event_int,
     event_ctrl = event_ctrl,
-    n_int      = n_int,
-    n_ctrl     = n_ctrl,
+    n_int = n_int,
+    n_ctrl = n_ctrl,
     likelihood = "binomial",
-    estimand   = "RR",
+    estimand = "RR",
     model_type = "random_effect",
-    stage      = "two_stage",
-    mu_prior   = mu_prior,
-    tau_prior  = tau_prior)
+    stage = "two_stage",
+    mu_prior = mu_prior,
+    tau_prior = tau_prior)
 }
 
 
@@ -572,12 +572,26 @@ binary_rr_row <- function(data, fit, label,
   hi <- fit$summary$q97.5[1]
 
   tibble::tibble(
-    Outcome          = label,
-    k                = dplyr::n_distinct(data[[studyvar]]),
-    `Intervention`   = fmt_n(sum(data[[event_int]]),  sum(data[[n_int]])),
-    `Control`        = fmt_n(sum(data[[event_ctrl]]), sum(data[[n_ctrl]])),
-    `RR [95% CrI]`   = sprintf("%.2f [%.2f, %.2f]", exp(mu), exp(lo), exp(hi)),
-    `Pr(Benefit)`    = mean(fit$draws$mu < 0))
+    Outcome = label,
+    k = dplyr::n_distinct(data[[studyvar]]),
+    `Intervention` = fmt_n(sum(data[[event_int]]),  sum(data[[n_int]])),
+    `Control` = fmt_n(sum(data[[event_ctrl]]), sum(data[[n_ctrl]])),
+    `RR [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", exp(mu), exp(lo), exp(hi)),
+    `Pr(Benefit)` = mean(fit$draws$mu < 0))
+}
+
+
+res_row <- function(fit, label) {
+  rd <- as.numeric(fit$marginal$draws)
+  q <- stats::quantile(rd, c(0.5, 0.025, 0.975), names = FALSE)
+  tibble::tibble(
+    Outcome = label,
+    Measure = "RD",
+    Units = NA,
+    `Estimate [95% CrI]` = sprintf("%.2f [%.2f, %.2f]", q[1], q[2], q[3]),
+    `Pr(Benefit)` = mean(rd > 0),
+    ess = TRUE,
+    ce = TRUE)
 }
 
 #' @export
