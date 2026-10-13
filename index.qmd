@@ -1503,11 +1503,9 @@ The robustness of the primary estimate was assessed against (i)
 alternative estimands — difference in medians, ratio of medians, and
 mean difference using alternative median-to-mean conversion methods;
 (ii) alternative model specifications; (iii) alternative priors —
-weakly regularising ($\mu \sim N(0, 3.2)$, $\tau \sim \text{HN}(0, 1.6)$
-days, scaled to the SD of hospital length of stay in an external DKA
-cohort) and informative ($\mu \sim N(-0.5, 0.30)$ days, with
+weakly regularising ($\mu \sim N(0,1)$, $\tau \sim \text{HN}(0, 0.75)$), vague ($\mu \sim (0,3)$, $\tau \sim \text{HN}(0, 0.75)$) informative ($\mu \sim N(-0.5, 0.30)$,
 $\tau \sim \text{HN}(0, 0.75)$); (iv) exclusion of trials at
-high risk of bias (protocol 2.8.9); and (v) the specification of the
+high risk of bias; and (v) the specification of the
 heterogeneity prior.
 
 ::: panel-tabset
@@ -1668,13 +1666,13 @@ dplyr::bind_rows(
 
 priors_sens <- list(
   primary = list(
-    name = "Primary (prespecified)",
-    mu_prior = priors$hosp_los$mu,
-    tau_prior = priors$hosp_los$tau),
-  weak_reg = list(
-    name = "Weakly Regularising",
-    mu_prior = priors$hosp_los_wr$mu,
-    tau_prior = priors$hosp_los_wr$tau),
+    name = "Primary (Weakly Regularising)",
+    mu_prior = normal(0, 1),
+    tau_prior = half_normal(0, 0.75)),
+  vague = list(
+    name = "Vague",
+    mu_prior = normal(0, 3),
+    tau_prior = half_normal(0, 0.75)),
   informative = list(
     name = "Informative",
     mu_prior = normal(-0.5, 0.3),
@@ -1689,7 +1687,7 @@ bayesma::sensitivity_plot(
   incl_random_effect = TRUE,
   exclude_high_rob = TRUE,
   rob_var = Overall,
-  prior_order = c("primary", "weak_reg", "informative"),
+  prior_order = c("primary", "vague", "informative"),
   label_intervention = "BMES",
   label_control = "0.9% NaCl",
   add_null_range = TRUE,
