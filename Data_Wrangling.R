@@ -209,6 +209,11 @@ dat_icu_los <- build_dataset(dat, "icu_los", "n_icu_los_int", "n_icu_los_ctrl", 
 dat_time_res <- build_dataset(dat, "time_res", "n_analysed_int", "n_analysed_ctrl", convert_mean = TRUE, mean_method = "wan")
 dat_insulin_dur <- build_dataset(dat, "insulin_dur", "N_insulin_dur_int", "N_insulin_dur_ctrl", convert_mean = TRUE, mean_method = "wan")
 
+dat_time_res <- dat_time_res |> 
+  left_join(dat |> select(study_id, dka_def), by = "study_id") |> 
+  mutate(dka_def_group = if_else(str_detect(dka_def, "ADA"), "ADA", "Non-ADA")) |> 
+  relocate(c("dka_def", "dka_def_group"), .after = age_group)
+
 build_res_dataset <- function(data, hour) {
   n_int <- paste0("N_prop_res", hour, "_int")
   n_ctrl <- paste0("N_prop_res", hour, "_ctrl")
@@ -324,7 +329,8 @@ adverse_events <- c(
   "Hypokalaemia" = "Hypokalaemia",
   "Hypoglycaemia" = "Hypoglycaemia",
   "Mechanical ventilation" = "Mechanical ventilation",
-  "AKI" = "AKI")
+  "AKI" = "AKI",
+  "Neurological Deterioration" = "Neurological Deterioration")
 
 # Binary-outcome ICCs (none reported; BEST-DKA hospital LOS ICCs assumed)
 icc_ae <- tibble::tribble(
@@ -338,6 +344,12 @@ dat_ae_raw <- readxl::read_excel("Data/Adverse.xlsx") |>
   dplyr::mutate(
     study_id = paste(Study, Year),
     Event = dplyr::if_else(grepl("^Death", Outcome), "Mortality", Outcome)) |>
+  dplyr::mutate(Event = case_when(
+    Event == "Cerebral oedema" ~ "Neurological Deterioration",
+    Event == "Decrease in GCS >2" ~ "Neurological Deterioration",
+    Event == "Seizure" ~ "Neurological Deterioration",
+    Event == "Altered consciousness" ~ "Neurological Deterioration",
+    TRUE ~ Event)) |> 
   dplyr::filter(Event %in% adverse_events)
 
 build_ae_dataset <- function(data, event) {
@@ -357,7 +369,7 @@ build_ae_dataset <- function(data, event) {
       n_int = round(Balanced_N / deff),
       event_ctrl = round(Saline_events / deff),
       n_ctrl = round(Saline_N / deff)) |>
-    dplyr::filter(!(event_int == 0 & event_ctrl == 0)) |>
+    #dplyr::filter(!(event_int == 0 & event_ctrl == 0)) |>
     dplyr::select(
       study_id, Author = Study, year = Year, Event, design, deff, i_summary, c_summary,
       event_int, n_int, event_ctrl, n_ctrl, event_int_raw = Balanced_events, n_int_raw = Balanced_N,

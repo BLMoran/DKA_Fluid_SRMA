@@ -332,6 +332,8 @@ tbl1 <- tbl1_long |>
      footnote = "AG, anion gap; AKI, acute kidney injury; BE, base excess; Cl, chloride; DAO, days alive and out of; DAOH-28, days alive and out of hospital to day 28; HCO3, bicarbonate; K, potassium; LOS, length of stay; MAKE30, major adverse kidney events at 30 days; MV, mechanical ventilation; Na, sodium; res, resolution; resus, resuscitation; RRT, renal replacement therapy; SBE, standard base excess; SC, subcutaneous; SID, strong ion difference.",
      locations = cells_column_labels(columns = c(primary, secondary)))
 
+gt::gtsave(tbl1, "Table1.docx")
+
 tbl1
 ```
 
@@ -909,6 +911,33 @@ egger_dka_res <- bayesma::egger(
 
 bayesma::egger_plot(egger_dka_res, type = "beta_posterior")
 ```
+
+## Subgroup Plot on DKA Resolution Diagnostic Criteria
+
+```{r, warning=FALSE}
+#| fig-height: 7
+#| fig-width: 10
+#| out-width: "100%"
+
+forest(model = fit_dka_res_re,
+       data = dat_time_res,
+       estimand = "MD",
+       studyvar   = "Author",
+       year = "year",
+       c_mean = "mean_ctrl",
+       i_mean  = "mean_int",
+       c_sd = "sd_ctrl",
+       i_sd = "sd_int",
+       c_n     = "n_ctrl",
+       i_n      = "n_int",
+       label_intervention = "BMES",
+       label_control = "0.9% NaCl",
+       xlim = c(-10, 10),
+       x_label = "Mean Difference (Hours)",
+       subgroup = TRUE,
+       subgroup_var = "dka_def_group")
+```
+
 :::
 
 ### Proportion of Patients with DKA Resolution at 24 Hours
@@ -1337,7 +1366,11 @@ fits_ae |>
     locations = gt::cells_column_labels(`RR [95% CrI]`)) |>
   gt::tab_footnote(
     "Posterior probability RR < 1 (fewer events with BMES).",
-    locations = gt::cells_column_labels(`Pr(Benefit)`))
+    locations = gt::cells_column_labels(`Pr(Benefit)`)) |> 
+  gt::tab_footnote(
+    "Neurological Deterioration is a composite of cerebral oedema, seizures, altered consciousness, decrease in GCS >2",
+    locations = gt::cells_body(columns = `Adverse Event`, rows = `Adverse Event` == "Neurological Deterioration")) |>
+  gt::gtsave("AE Table.docx")
 
 
 ```
@@ -1345,7 +1378,7 @@ fits_ae |>
 ## Summary of All Outcomes
 
 ```{r, warning=FALSE}
-
+tbl_outcome <- 
 dplyr::bind_rows(
   summary_row(fit_hosp_los_re, "Hospital LOS", "MD", "days") |>
     dplyr::mutate(Group = "Primary"),
@@ -1401,6 +1434,7 @@ dplyr::bind_rows(
     "Common-effect model (four trials); estimand is the marginal risk difference",
     locations = gt::cells_body(columns = dplyr::all_of(outcome_col), rows = ce)) |>
   gt::sub_missing(missing_text = "\u2014")
+
 ```
 
 ## Assessment of Bias
@@ -1611,6 +1645,7 @@ est_row <- function(fit, estimand, method, mcid, ratio = FALSE) {
     `Pr(Benefit > MCID)` = mean(mu < mcid))
 }
 
+est_tbl <- 
 dplyr::bind_rows(
   fits_mean |>
     purrr::imap(\(fit, m) {
@@ -1654,6 +1689,8 @@ dplyr::bind_rows(
   gt::tab_footnote(
     "Yan 2024 excluded for Quantile Estimation, Box-Cox and Shi due to implausible conversion of its bimodal control-arm distribution.",
     locations = gt::cells_column_labels(Method))
+
+gt::gtsave(est_tbl, "Estimand Table.docx")
 
 ```
 
@@ -1708,7 +1745,7 @@ estimate, and whether the data conflict with that prior.
 #| label: tbl-tau-sensitivity
 #| tbl-cap: "Prior-dominance assessment: posterior contraction, prior percentile of the posterior median, and the pooled effect across a grid of tau priors."
 
-gt_prior_dominance(pd)
+gt_prior_dominance(pd) |> gt::gtsave("Tau Prior Dominance.docx")
 
 sweep_tau <- tau_scale_sweep(
   fit_hosp_los_re,
@@ -1823,7 +1860,7 @@ grade_sym <- function(x) {
 
 tbl_sof <- dplyr::bind_rows(
   sof_row(fit_hosp_los_re$draws$mu, dat_hosp_los, "Hospital LOS (days)", "md", 3.75, mcid = 0.5,
-    certainty = "Moderate", comment = "Downgraded for risk of bias and imprecision"),
+    certainty = "Low", comment = "Downgraded for risk of bias, imprecision and potential small-study bias."),
   sof_row(fit_icu_los_re$draws$mu, dat_icu_los, "ICU LOS (hours)", "md", 41.6, mcid = 6,
     certainty = "Very low", comment = "Downgraded for risk of bias, inconsistency and imprecision"),
   sof_row(fit_dka_res_re$draws$mu, dat_time_res, "Time to DKA resolution (hours)", "md", ctrl_mean(dat_time_res), mcid = 6,
