@@ -695,7 +695,8 @@ fit_icu_los_re <- bayesma(
   model_type = "random_effect",
   stage      = "two_stage",
   mu_prior   = priors$icu_los$mu,
-  tau_prior  = priors$icu_los$tau)
+  tau_prior  = priors$icu_los$tau,
+  adapt_delta = 0.99)
 
 ```
 
@@ -1369,8 +1370,7 @@ fits_ae |>
     locations = gt::cells_column_labels(`Pr(Benefit)`)) |> 
   gt::tab_footnote(
     "Neurological Deterioration is a composite of cerebral oedema, seizures, altered consciousness, decrease in GCS >2",
-    locations = gt::cells_body(columns = `Adverse Event`, rows = `Adverse Event` == "Neurological Deterioration")) |>
-  gt::gtsave("AE Table.docx")
+    locations = gt::cells_body(columns = `Adverse Event`, rows = `Adverse Event` == "Neurological Deterioration")) 
 
 
 ```
@@ -1378,7 +1378,7 @@ fits_ae |>
 ## Summary of All Outcomes
 
 ```{r, warning=FALSE}
-tbl_outcome <- 
+
 dplyr::bind_rows(
   summary_row(fit_hosp_los_re, "Hospital LOS", "MD", "days") |>
     dplyr::mutate(Group = "Primary"),
@@ -1545,7 +1545,7 @@ heterogeneity prior.
 ::: panel-tabset
 ## Alternate Estimands
 
-```{r}
+```{r, warning=FALSE}
 # Mean difference- different conversion methods
 methods  <- c("wan", "luo", "qe", "bc", "shi", "yang")
 excl_yan <- c("qe", "bc", "shi")
@@ -1690,6 +1690,7 @@ dplyr::bind_rows(
     "Yan 2024 excluded for Quantile Estimation, Box-Cox and Shi due to implausible conversion of its bimodal control-arm distribution.",
     locations = gt::cells_column_labels(Method))
 
+est_tbl
 gt::gtsave(est_tbl, "Estimand Table.docx")
 
 ```
