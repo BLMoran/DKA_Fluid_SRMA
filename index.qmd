@@ -552,6 +552,7 @@ subgroup_rows <- function(fit, coef, labels, units = "days", ratio = FALSE) {
     purrr::list_rbind()
 }
 
+tbl_metareg_age <- 
 subgroup_rows(metareg_age, coef = "age_groupPaediatric", labels = c("Adult", "Paediatric")) |>
   gt::gt() |>
   gt::cols_label(`Estimate [95% CrI]` = "MD, days [95% CrI]", `Pr(< 0)` = "Pr(Benefit)") |>
@@ -568,6 +569,9 @@ subgroup_rows(metareg_age, coef = "age_groupPaediatric", labels = c("Adult", "Pa
   gt::tab_footnote(
     "For the difference row: posterior probability of a greater reduction in children than adults.",
     locations = gt::cells_column_labels(`Pr(< 0)`))
+
+gt::gtsave(tbl_metareg_age, "Table_metareg_age.docx")
+tbl_metareg_age
 ```
 
 ## BMES Fluid
@@ -616,6 +620,7 @@ metareg_bmes <- meta_reg(data = dat_hosp_los,
          tau_prior  = half_normal(0, 0.75))
 
 # Reference level is Plasma-Lyte (mu); Ringer's Solution = mu + beta. Labels must follow that order.
+tbl_metareg_bmes <- 
 subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Plasma-Lyte", "Ringer's Solution")) |>
   gt::gt() |>
   gt::cols_label(`Estimate [95% CrI]` = "MD, days [95% CrI]", `Pr(< 0)` = "Pr(Benefit)") |>
@@ -632,6 +637,9 @@ subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Pla
   gt::tab_footnote(
     "For the difference row: posterior probability of a greater reduction with Ringer's solution than Plasma-Lyte.",
     locations = gt::cells_column_labels(`Pr(< 0)`))
+
+gt::gtsave(tbl_metareg_bmes, "Table_metareg_bmes.docx")
+tbl_metareg_bmes
 ```
 :::
 
@@ -654,8 +662,6 @@ duration of insulin infusion from the saline arm of Chua et al. (SD ≈
 tibble::tribble(
   ~Outcome, ~Units, ~`External SD`, ~Source, ~`μ prior`, ~`τ prior`,
   "Hospital LOS (primary, prespecified)", "days", NA, "Protocol", "N(0, 1)", "HN(0, 0.75)",
-  "Hospital LOS (weakly regularising, sensitivity)", "days", ext_sd[["hosp_los"]], "Venkatesh (2015)",
-    sprintf("N(0, %.1f)", ext_sd[["hosp_los"]]), sprintf("HN(0, %.1f)", 0.5 * ext_sd[["hosp_los"]]),
   "ICU LOS", "hours", ext_sd[["icu_los"]], "Venkatesh (2015)",
     sprintf("N(0, %.0f)", ext_sd[["icu_los"]]), sprintf("HN(0, %.0f)", 0.5 * ext_sd[["icu_los"]]),
   "Time to DKA resolution", "hours", ext_sd[["time_res"]], "Chua (2012) (insulin duration)",
@@ -1373,7 +1379,7 @@ tbl_ae <- fits_ae |>
     "Neurological Deterioration is a composite of cerebral oedema, seizures, altered consciousness, decrease in GCS >2",
     locations = gt::cells_body(columns = `Adverse Event`, rows = `Adverse Event` == "Neurological Deterioration")) 
 
-gt::gtsave(tbl_ae, "Table1.docx")
+gt::gtsave(tbl_ae, "AE Table.docx")
 
 tbl_ae
 ```
@@ -1540,7 +1546,7 @@ The robustness of the primary estimate was assessed against (i)
 alternative estimands — difference in medians, ratio of medians, and
 mean difference using alternative median-to-mean conversion methods;
 (ii) alternative model specifications; (iii) alternative priors —
-weakly regularising ($\mu \sim N(0,1)$, $\tau \sim \text{HN}(0, 0.75)$), vague ($\mu \sim (0,3)$, $\tau \sim \text{HN}(0, 0.75)$) informative ($\mu \sim N(-0.5, 0.30)$,
+weakly regularising ($\mu \sim N(0,1)$, $\tau \sim \text{HN}(0, 0.75)$), vague ($\mu \sim \text{N}(0,3)$, $\tau \sim \text{HN}(0, 0.75)$) informative ($\mu \sim N(-0.5, 0.30)$,
 $\tau \sim \text{HN}(0, 0.75)$); (iv) exclusion of trials at
 high risk of bias; and (v) the specification of the
 heterogeneity prior.
