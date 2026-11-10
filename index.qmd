@@ -427,8 +427,8 @@ bayesma::overall_plot(model = fit_hosp_los_re,
 #| fig-width: 12
 #| fig-align: center
 
-dat_rob <- readxl::read_excel("Data/ROB_DistillerSR2.xlsx")
-bayesfoRest::rob_plot(data = dat_rob, add_rob_legend = TRUE, rob_tool = "distillersr", show_overall = FALSE)
+dat_rob <- readxl::read_excel("Data/DKA_MA_Combined_ROB2.xlsx", sheet = 5)
+robbR::rob_plot(data = dat_rob, studyvar = author, year = year, add_rob_legend = TRUE, rob_tool = "clarity", show_overall = FALSE)
 ```
 
 ## Funnel Plot
@@ -615,7 +615,8 @@ metareg_bmes <- meta_reg(data = dat_hosp_los,
          mu_prior   = normal(0, 1),
          tau_prior  = half_normal(0, 0.75))
 
-subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Ringer's Solution", "Plasma-Lyte")) |>
+# Reference level is Plasma-Lyte (mu); Ringer's Solution = mu + beta. Labels must follow that order.
+subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Plasma-Lyte", "Ringer's Solution")) |>
   gt::gt() |>
   gt::cols_label(`Estimate [95% CrI]` = "MD, days [95% CrI]", `Pr(< 0)` = "Pr(Benefit)") |>
   gt::fmt_number(columns = `Pr(< 0)`, decimals = 2) |>
@@ -629,7 +630,7 @@ subgroup_rows(metareg_bmes, coef = "bmes_typeRinger's Solution", labels = c("Rin
     "Bayesian random-effects meta-regression with BMES group as a moderator; between-study heterogeneity (\u03c4) shared across subgroups.",
     locations = gt::cells_title("title")) |>
   gt::tab_footnote(
-    "For the difference row: posterior probability of a greater reduction in Plasma-Lyte than Ringer's solution",
+    "For the difference row: posterior probability of a greater reduction with Ringer's solution than Plasma-Lyte.",
     locations = gt::cells_column_labels(`Pr(< 0)`))
 ```
 :::
@@ -1334,7 +1335,7 @@ by each trial were used.
 ```{r, warning=FALSE}
 #| label: tbl-adverse-events
 
-fits_ae |>
+tbl_ae <- fits_ae |>
   purrr::imap(ae_row) |>
   purrr::list_rbind() |>
   gt::gt() |>
@@ -1372,7 +1373,9 @@ fits_ae |>
     "Neurological Deterioration is a composite of cerebral oedema, seizures, altered consciousness, decrease in GCS >2",
     locations = gt::cells_body(columns = `Adverse Event`, rows = `Adverse Event` == "Neurological Deterioration")) 
 
+gt::gtsave(tbl_ae, "Table1.docx")
 
+tbl_ae
 ```
 
 ## Summary of All Outcomes
@@ -1453,7 +1456,7 @@ not used to adjust the pooled estimate.
 #| fig-width: 12
 #| fig-align: center
 
-bayesfoRest::rob_plot(data = dat_rob, add_rob_legend = TRUE, rob_tool = "distillersr", show_overall = FALSE)
+robbR::rob_plot(data = dat_rob, studyvar = author, year = year, add_rob_legend = TRUE, rob_tool = "clarity", show_overall = FALSE)
 ```
 
 ## Assessment of Heterogeneity
