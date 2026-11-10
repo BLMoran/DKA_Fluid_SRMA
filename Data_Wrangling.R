@@ -253,8 +253,8 @@ dat_mortality <- dat |>
   dplyr::mutate(
     event_int  = dplyr::coalesce(hosp_mort_int,  `28d_mort_int`),
     event_ctrl = dplyr::coalesce(hosp_mort_ctrl, `28d_mort_ctrl`),
-    n_int      = n_analysed_int,
-    n_ctrl     = n_analysed_ctrl,
+    n_int      = dplyr::coalesce(n_analysed_int,  `n_mort_int`),
+    n_ctrl     = dplyr::coalesce(n_analysed_ctrl,  `n_mort_ctrl`),
     age_group  = as.character(age_group),
     i_summary  = sprintf("%d/%d (%.1f%%)", event_int,  n_int,  100 * event_int  / n_int),
     c_summary  = sprintf("%d/%d (%.1f%%)", event_ctrl, n_ctrl, 100 * event_ctrl / n_ctrl),
@@ -335,7 +335,7 @@ adverse_events <- c(
 # Binary-outcome ICCs (none reported; BEST-DKA hospital LOS ICCs assumed)
 icc_ae <- tibble::tribble(
   ~study_id, ~rho_w_ae, ~rho_b_ae,
-  "Ramanan 2026", 0.0108, 0)
+  "Ramanan 2027", 0.0108, 0)
 
 design_ae <- dat |>
   dplyr::distinct(study_id, design, n_clusters, n_periods, rho_w, rho_b)
@@ -364,12 +364,11 @@ build_ae_dataset <- function(data, event) {
       deff = dplyr::coalesce(design_effect(design, m, rho_w, rho_b, NA_real_), 1),
       i_summary = sprintf("%d/%d (%.1f%%)", Balanced_events, Balanced_N, 100 * Balanced_events / Balanced_N),
       c_summary = sprintf("%d/%d (%.1f%%)", Saline_events, Saline_N, 100 * Saline_events / Saline_N),
-      # DEFF-adjusted effective counts (Cochrane Handbook 23.1.4)
+      # DEFF-adjusted effective counts
       event_int = round(Balanced_events / deff),
       n_int = round(Balanced_N / deff),
       event_ctrl = round(Saline_events / deff),
       n_ctrl = round(Saline_N / deff)) |>
-    #dplyr::filter(!(event_int == 0 & event_ctrl == 0)) |>
     dplyr::select(
       study_id, Author = Study, year = Year, Event, design, deff, i_summary, c_summary,
       event_int, n_int, event_ctrl, n_ctrl, event_int_raw = Balanced_events, n_int_raw = Balanced_N,
